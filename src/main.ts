@@ -6,7 +6,8 @@ import { unlockAudio } from './sfx';
 import { BootScene } from './scenes/Boot';
 import { SetupScene } from './scenes/Setup';
 import { HubScene } from './scenes/Hub';
-import { TBallScene } from './scenes/TBall';
+import { GameScene } from './scenes/Game';
+import { ShopScene } from './scenes/Shop';
 import { QuestScene } from './scenes/Quest';
 
 // iPad Safari only allows sound after the first touch.
@@ -28,7 +29,7 @@ async function start() {
     backgroundColor: '#1b3a6b',
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     input: { activePointers: 2 },
-    scene: [BootScene, SetupScene, HubScene, TBallScene, QuestScene],
+    scene: [BootScene, SetupScene, HubScene, GameScene, QuestScene, ShopScene],
   });
   // Handy for poking at the game from the browser console while developing.
   if (import.meta.env.DEV) (window as unknown as { game: Phaser.Game }).game = game;

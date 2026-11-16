@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
 import { W, H, ZOOM } from './ui';
+import { fenceR } from './play';
+
+export { fenceR, FIELDERS } from './play';
 
 // World units are feet. Home plate is the origin, +y points to center field, +x to right field, +z is up.
 // The camera sits behind home plate, so the field is drawn in simple perspective.
@@ -14,12 +17,6 @@ export function project(x: number, y: number, z = 0) {
   return { x: W / 2 + x * s, y: HORIZON + (CAM_H - z) * s, s };
 }
 
-// Kid-sized park: 150 ft to center, 120 ft down the lines. Theta is radians from center field.
-export function fenceR(theta: number) {
-  const t = Phaser.Math.Clamp(theta, -Math.PI / 2, Math.PI / 2);
-  return 120 + 30 * Math.cos(2 * t);
-}
-
 export const MOUND = { x: 0, y: 46 };
 export const BASE_PATH = [
   { x: -3, y: -1 },
@@ -27,17 +24,6 @@ export const BASE_PATH = [
   { x: 0, y: 84.8 },
   { x: -42.4, y: 42.4 },
   { x: 0, y: 0 },
-];
-
-export const FIELDERS = [
-  { id: 'LF', x: -62, y: 118 },
-  { id: 'CF', x: 0, y: 135 },
-  { id: 'RF', x: 62, y: 118 },
-  { id: '2B', x: 22, y: 74 },
-  { id: 'SS', x: -22, y: 74 },
-  { id: '1B', x: 36, y: 50 },
-  { id: '3B', x: -36, y: 50 },
-  { id: 'P', x: 0, y: 46 },
 ];
 
 function polar(r: number, th: number) {

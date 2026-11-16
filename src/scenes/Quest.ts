@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { W, txt, Btn, Panel, goto, INK } from '../ui';
 import { BattingBase } from './BattingBase';
-import { project, fenceR, MOUND } from '../field';
-import { makeKid, makePitcher, Pitcher } from '../figures';
-import { saveProfile, ROSIE, ROSIE_LOOK, PLAYER_RATING } from '../data';
+import { project, fenceR } from '../field';
+import { makeKid, Look } from '../figures';
+import { saveProfile, ROSIE, ROSIE_LOOK, ageOf, overall, skillsOf } from '../data';
+import { judge } from '../play';
 import { sfx } from '../sfx';
 
 const GOAL = 5;
@@ -14,11 +15,12 @@ const WINDOW = 7;
 const REWARD = 10;
 const REPLAY_REWARD = 2;
 
+const GRAY: Look = { jersey: 0x9aa5b1, cap: 0x495057, pants: 0xe9ecef, skin: 0xe0ac69, hair: 0x3b2614, girl: false };
+
 type Phase = 'wait' | 'windup' | 'flight' | 'gone';
 
 // The home-run quest: hit 5 homers off Rocket Rosie before you run out of pitches.
 export class QuestScene extends BattingBase {
-  private rosie!: Pitcher;
   private homers = 0;
   private left = PITCHES;
   private phase: Phase = 'wait';
@@ -26,23 +28,20 @@ export class QuestScene extends BattingBase {
   private pitchTween?: Phaser.Tweens.Tween;
   private slots: Phaser.GameObjects.Image[] = [];
   private leftText!: Phaser.GameObjects.Text;
-  private timingText!: Phaser.GameObjects.Text;
 
   constructor() {
     super('quest');
   }
 
   create() {
-    this.buildField(false);
+    this.buildField();
     this.homers = 0;
     this.left = PITCHES;
     this.phase = 'wait';
     this.slots = [];
-    this.rosie = makePitcher(this, ROSIE_LOOK);
-    this.placeFig(this.rosie.c, MOUND.x, MOUND.y);
-    this.hideBall();
+    this.setDefense((id) => (id === 'P' ? ROSIE_LOOK : GRAY));
+    this.setBatter(this.look);
     this.drawHud();
-    this.timingText = txt(this, 360, 600, '', 34, { strokeThickness: 8 }).setDepth(900);
 
     this.input.off('pointerdown');
     this.input.on('pointerdown', (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
@@ -71,16 +70,21 @@ export class QuestScene extends BattingBase {
   }
 
   private showIntro() {
+    const you = overall(this.prof);
     const p = new Panel(this, 820, 560);
     p.add(txt(this, W / 2, 210, 'HOME RUN QUEST', 60, { color: '#ffd23f', strokeThickness: 12 }));
     p.add(this.add.ellipse(W / 2 - 250, 470, 170, 36, 0x45a849));
     p.add(makeKid(this, ROSIE_LOOK, { glove: true }).setPosition(W / 2 - 250, 474).setScale(2.3));
     p.add(txt(this, W / 2 + 90, 300, ROSIE.name.toUpperCase(), 40, { color: '#7b3fe4', strokeThickness: 0 }));
     p.add(
-      txt(this, W / 2 + 90, 352, `Age ${ROSIE.age}  ·  Pitcher  ·  Rating ${ROSIE.rating}\n(You are ${PLAYER_RATING}. She's a little better!)`, 22, {
-        body: true,
-        color: '#5b6b88',
-      }),
+      txt(
+        this,
+        W / 2 + 90,
+        352,
+        `Age ${ageOf(this.prof) + ROSIE.ageBonus}  ·  Pitcher  ·  Rating ${you + ROSIE.edge}\n(You are ${you}. She's a little better!)`,
+        22,
+        { body: true, color: '#5b6b88' },
+      ),
     );
     p.add(
       txt(
@@ -122,7 +126,7 @@ export class QuestScene extends BattingBase {
 
   private windup() {
     this.phase = 'windup';
-    const { c, arm } = this.rosie;
+    const { c, arm } = this.pitcher!;
     const y0 = c.y;
     arm.setRotation(0.15);
     this.tweens.add({ targets: c, y: y0 - 6 * c.scaleY, duration: 450, yoyo: true, ease: 'Sine.easeInOut' });
@@ -169,7 +173,7 @@ export class QuestScene extends BattingBase {
         this.hideBall();
         sfx.thud();
         if (!this.swung) {
-          this.flash('SWING!', '#ffffff');
+          this.flash('SWING!', '#ffffff', 360, 600);
           this.time.delayedCall(800, () => this.nextPitch());
         }
       },
@@ -177,17 +181,21 @@ export class QuestScene extends BattingBase {
   }
 
   private trySwing() {
-    if (this.phase === 'wait' || this.swung || this.batter.swinging) return;
+    if (this.phase === 'wait' || this.swung || !this.batter || this.batter.swinging) return;
     this.swung = true;
     sfx.swing();
     this.batter.swing(this, () => this.contact());
   }
 
+  private window() {
+    return WINDOW * (0.75 + skillsOf(this.prof).contact / 160);
+  }
+
   private contact() {
     const err = this.phase === 'flight' ? this.bpos.y : this.phase === 'windup' ? 99 : -99;
-    if (Math.abs(err) > WINDOW) {
+    if (Math.abs(err) > this.window()) {
       sfx.whiff();
-      this.flash(err > 0 ? 'TOO EARLY!' : 'TOO LATE!', '#ffffff');
+      this.flash(err > 0 ? 'TOO EARLY!' : 'TOO LATE!', '#ffffff', 360, 600);
       // The pitch keeps going; when it reaches the backstop the next one starts.
       if (this.phase === 'gone') this.time.delayedCall(800, () => this.nextPitch());
       return;
@@ -198,26 +206,33 @@ export class QuestScene extends BattingBase {
   }
 
   private async hit(err: number) {
+    const win = this.window();
+    const power = skillsOf(this.prof).power;
     // Quality falls off gently near the sweet spot, so near-perfect swings all clear the fence.
-    const q = 1 - Math.pow(Math.abs(err) / WINDOW, 2);
+    const q = 1 - Math.pow(Math.abs(err) / win, 2);
     // Early swings pull the ball to left field, late swings push it to right.
-    const angle = Phaser.Math.Clamp((-err / WINDOW) * 0.75 + Phaser.Math.FloatBetween(-0.12, 0.12), -0.75, 0.75);
-    let dist = 45 + q * 130 + Phaser.Math.Between(-8, 8);
+    const angle = Phaser.Math.Clamp((-err / win) * 0.75 + Phaser.Math.FloatBetween(-0.12, 0.12), -0.75, 0.75);
+    let dist = 45 + q * (130 + (power - 40) * 0.4) + Phaser.Math.Between(-8, 8);
     const homer = dist > fenceR(angle) + 2;
     if (homer) dist += 30;
     const grounder = !homer && q < 0.35;
+    const apex = homer ? 38 : grounder ? 0 : 10 + q * 26;
+    const time = homer ? 1900 : (grounder ? 700 : 900) + dist * 8;
     sfx.crack(homer);
     this.cameras.main.shake(110, homer ? 0.006 : 0.003);
-    if (Math.abs(err) < 1.5) this.flash('PERFECT TIMING!', '#8ce99a');
-    else this.flash(err > 0 ? 'A LITTLE EARLY' : 'A LITTLE LATE', '#ffe066');
+    if (Math.abs(err) < 1.5) this.flash('PERFECT TIMING!', '#8ce99a', 360, 600);
+    else this.flash(err > 0 ? 'A LITTLE EARLY' : 'A LITTLE LATE', '#ffe066', 360, 600);
 
+    const play = homer ? null : judge({ angle, dist, apex, grounder, time: time / 1000 }, 50, 50);
+    const caught = play?.res === 'OUT';
     await this.flyBall({
       angle,
       dist,
-      apex: homer ? 38 : grounder ? 0 : 10 + q * 26,
-      time: homer ? 1900 : (grounder ? 700 : 900) + dist * 8,
+      apex,
+      time,
       grounder,
-      chase: homer ? undefined : grounder ? 'field' : 'catch',
+      who: play?.who === 'C' ? undefined : play?.who,
+      stopAt: caught ? (grounder && play?.t ? (play.t * 1000) / time : 1) : undefined,
     });
 
     if (homer) {
@@ -227,25 +242,19 @@ export class QuestScene extends BattingBase {
       this.fireworks(4);
       this.banner('HOME RUN!', '#ffd23f', `${this.homers} of ${GOAL}`, 1300);
       slot.setVisible(true).setScale(0.1);
-      this.tweens.add({ targets: slot, scale: (36 / 64) * 1.0, duration: 400, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: slot, scale: 36 / 64, duration: 400, ease: 'Back.easeOut' });
       await this.wait(1500);
     } else {
       sfx.aww();
       if (grounder) this.banner('GROUNDER', '#ffffff', 'Get under it for a homer!');
-      else if (dist > 105) this.banner('SO CLOSE!', '#ffffff', 'Caught at the wall!');
-      else this.banner('CAUGHT!', '#ffffff', 'Keep swinging!');
+      else if (dist > 105) this.banner('SO CLOSE!', '#ffffff', caught ? 'Caught at the wall!' : 'Off the wall!');
+      else this.banner(caught ? 'CAUGHT!' : 'BASE HIT', '#ffffff', 'Not a homer. Keep swinging!');
       await this.wait(1400);
     }
+    this.hideBall();
     this.resetFielders();
     await this.wait(500);
     this.nextPitch();
-  }
-
-  private flash(s: string, color: string) {
-    this.tweens.killTweensOf(this.timingText);
-    this.timingText.setText(s).setColor(color).setAlpha(1).setScale(0.6);
-    this.tweens.add({ targets: this.timingText, scale: 1, duration: 200, ease: 'Back.easeOut' });
-    this.tweens.add({ targets: this.timingText, alpha: 0, delay: 1000, duration: 300 });
   }
 
   private async win() {
@@ -271,7 +280,7 @@ export class QuestScene extends BattingBase {
       ),
     );
     const home = project(0, 0, 3);
-    await this.awardTokens(earned, home.x, home.y - 200, before);
+    await this.award(this.tokens, 'coin', earned, home.x, home.y - 200, before);
     p.add(new Btn(this, W / 2 - 160, 540, 280, 80, 'PLAY AGAIN', 0x7b3fe4, () => goto(this, 'quest'), 32));
     p.add(new Btn(this, W / 2 + 160, 540, 280, 80, 'CLUBHOUSE', 0x3b82d6, () => goto(this, 'hub'), 32));
   }

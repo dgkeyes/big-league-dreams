@@ -40,6 +40,16 @@ export class BootScene extends Phaser.Scene {
     g.generateTexture('coin', 64, 66);
     g.clear();
 
+    // a dollar bill
+    g.fillStyle(0x2b8a3e).fillRoundedRect(0, 2, 80, 48, 6);
+    g.fillStyle(0x8ce99a).fillRoundedRect(0, 0, 80, 48, 6);
+    g.lineStyle(3, 0x2b8a3e).strokeRoundedRect(5, 5, 70, 38, 4);
+    g.fillStyle(0x2b8a3e).fillCircle(40, 24, 11);
+    g.fillStyle(0x8ce99a).fillRect(38, 15, 4, 18);
+    g.fillStyle(0x2b8a3e).fillCircle(14, 24, 4).fillCircle(66, 24, 4);
+    g.generateTexture('cash', 80, 50);
+    g.clear();
+
     // Sparks and confetti get one frame per party color, because the Canvas renderer cannot tint.
     PARTY.forEach((c, i) => g.fillStyle(c).fillCircle(8 + i * 16, 8, 6));
     g.generateTexture('spark', 16 * PARTY.length, 16);

@@ -15,13 +15,13 @@ export function shade(c: number, amt: number) {
   return (f((c >> 16) & 255) << 16) | (f((c >> 8) & 255) << 8) | f(c & 255);
 }
 
-export function setupCamera(scene: Phaser.Scene) {
+export function setupCamera(scene: Phaser.Scene, fade = true) {
   scene.input.enabled = true;
   const cam = scene.cameras.main;
   cam.setZoom(ZOOM);
   cam.centerOn(W / 2, H / 2);
   cam.setBackgroundColor('#1b3a6b');
-  cam.fadeIn(250, 27, 58, 107);
+  if (fade) cam.fadeIn(250, 27, 58, 107);
 }
 
 export function goto(scene: Phaser.Scene, key: string, data?: object) {
@@ -135,20 +135,23 @@ export interface TokenPill {
   set(v: number): void;
 }
 
-export function tokenPill(scene: Phaser.Scene, x: number, y: number, n: number): TokenPill {
+// A counter pill: gold coins for tokens, green bills for money.
+export function tokenPill(scene: Phaser.Scene, x: number, y: number, n: number, kind: 'coin' | 'cash' = 'coin'): TokenPill {
+  const cash = kind === 'cash';
   const c = scene.add.container(x, y).setDepth(1000);
   const g = scene.add.graphics();
   g.fillStyle(0x0b1630, 0.55).fillRoundedRect(-95, -30, 190, 60, 30);
-  g.lineStyle(4, 0xffd23f).strokeRoundedRect(-95, -30, 190, 60, 30);
-  const coin = scene.add.image(-62, 0, 'coin').setDisplaySize(46, 46);
-  const t = txt(scene, 18, 2, String(n), 36, { color: '#ffe066' });
-  c.add([g, coin, t]);
+  g.lineStyle(4, cash ? 0x51cf66 : 0xffd23f).strokeRoundedRect(-95, -30, 190, 60, 30);
+  const icon = scene.add.image(-60, 0, kind).setDisplaySize(cash ? 50 : 46, cash ? 32 : 46);
+  const label = (v: number) => (cash ? `$${v}` : String(v));
+  const t = txt(scene, 18, 2, label(n), 34, { color: cash ? '#b2f2bb' : '#ffe066' });
+  c.add([g, icon, t]);
   return {
     c,
-    coinX: x - 62,
+    coinX: x - 60,
     coinY: y,
     set(v: number) {
-      t.setText(String(v));
+      t.setText(label(v));
       scene.tweens.add({ targets: c, scale: { from: 1.18, to: 1 }, duration: 220 });
     },
   };
@@ -179,4 +182,31 @@ export class Panel {
 
 export function pick<T>(a: T[]): T {
   return a[Math.floor(Math.random() * a.length)];
+}
+
+// Five skill bars. `extra` (from gear) shows as a lighter segment after the base value.
+export function skillBars(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  w: number,
+  rows: { name: string; color: number; base: number; extra?: number }[],
+  gap = 34,
+) {
+  const g = scene.add.graphics();
+  const labelW = 104;
+  rows.forEach((r, i) => {
+    const yy = y + i * gap;
+    txt(scene, x + labelW / 2, yy, r.name, 19, { body: true, color: INK }).setOrigin(0.5);
+    const bx = x + labelW;
+    const bw = w - labelW - 44;
+    g.fillStyle(0x1b2a4a, 0.12).fillRoundedRect(bx, yy - 9, bw, 18, 9);
+    const base = (Math.min(99, r.base) / 99) * bw;
+    const total = (Math.min(99, r.base + (r.extra ?? 0)) / 99) * bw;
+    if (total > base) g.fillStyle(shade(r.color, 0.45)).fillRoundedRect(bx, yy - 9, total, 18, 9);
+    g.fillStyle(r.color).fillRoundedRect(bx, yy - 9, Math.max(18, base), 18, 9);
+    const v = Math.min(99, r.base + (r.extra ?? 0));
+    txt(scene, bx + bw + 24, yy, String(v), 22, { color: r.extra ? '#2b8a3e' : INK, strokeThickness: 0 });
+  });
+  return g;
 }

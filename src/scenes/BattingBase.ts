@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { W, setupCamera, goto, Btn, tokenPill, TokenPill, txt } from '../ui';
-import { project, fenceR, drawField, FIELDERS, BASE_PATH } from '../field';
-import { Batter, makeKid, Look } from '../figures';
-import { Profile, getProfile, lookFor, FIELDER_LOOK } from '../data';
+import { project, fenceR, drawField, FIELDERS } from '../field';
+import { Batter, makeKid, makePitcher, Look, Pitcher } from '../figures';
+import { Profile, getProfile, lookFor, levelOf, Level } from '../data';
 import { sfx } from '../sfx';
 import { PARTY_FRAMES } from './Boot';
 
@@ -10,7 +10,7 @@ export const BATTER_X = 515;
 export const BATTER_Y = 792;
 export const BALL_DEPTH = 300;
 
-interface Fielder {
+export interface Fielder {
   c: Phaser.GameObjects.Container;
   id: string;
   x: number;
@@ -23,45 +23,50 @@ export interface FlyOpts {
   angle: number;
   dist: number;
   apex: number;
+  // Milliseconds for the whole flight: until a fly ball lands or a grounder stops rolling.
   time: number;
   grounder?: boolean;
-  // 'catch': a fielder gets there as it lands. 'field': it rolls and a fielder picks it up.
-  chase?: 'catch' | 'field';
+  // Fraction of the flight where a fielder gloves it. Above 1 means the ball stopped and waited for the fielder.
+  stopAt?: number;
+  // The fielder who goes after the ball.
+  who?: string;
 }
 
-// Shared pieces of the two batting screens: the field, fielders, batter, ball flight, and celebrations.
+// Shared pieces of the field screens: the park, the defense, the batter, ball flight, and celebrations.
 export abstract class BattingBase extends Phaser.Scene {
   protected prof!: Profile;
+  protected lv!: Level;
   protected look!: Look;
-  protected batter!: Batter;
+  protected batter?: Batter;
+  protected pitcher?: Pitcher;
   protected ball!: Phaser.GameObjects.Image;
   protected shadow!: Phaser.GameObjects.Ellipse;
   protected fielders: Fielder[] = [];
   protected tokens!: TokenPill;
+  protected cash!: TokenPill;
   protected bpos = { x: 0, y: 0, z: 0 };
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private confetti!: Phaser.GameObjects.Particles.ParticleEmitter;
   private bannerObjs: Phaser.GameObjects.Text[] = [];
+  private flashText!: Phaser.GameObjects.Text;
 
-  protected buildField(withPitcherFielder: boolean) {
+  protected buildField() {
     setupCamera(this);
     this.prof = getProfile();
-    this.look = lookFor(this.prof.gender, this.prof.league);
+    this.lv = levelOf(this.prof);
+    this.look = lookFor(this.prof.gender, this.prof.league, this.prof);
     this.bannerObjs = [];
-    drawField(this);
     this.fielders = [];
-    for (const s of FIELDERS) {
-      if (s.id === 'P' && !withPitcherFielder) continue;
-      const c = makeKid(this, FIELDER_LOOK, { glove: true });
-      this.placeFig(c, s.x, s.y);
-      this.fielders.push({ c, id: s.id, x: s.x, y: s.y, hx: s.x, hy: s.y });
-    }
+    this.batter = undefined;
+    this.pitcher = undefined;
+    drawField(this);
     this.shadow = this.add.ellipse(0, 0, 20, 8, 0x000000, 0.28).setDepth(60);
-    this.ball = this.add.image(0, 0, 'ball').setDepth(BALL_DEPTH);
-    this.batter = new Batter(this, BATTER_X, BATTER_Y, this.look, 1.9);
-    this.batter.c.setDepth(200);
-    new Btn(this, 92, 46, 150, 58, 'BACK', 0x34495e, () => goto(this, 'hub'), 24).setDepth(1000);
+    this.ball = this.add.image(0, 0, 'ball').setDepth(BALL_DEPTH).setVisible(false);
+    this.shadow.setVisible(false);
+    new Btn(this, 92, 46, 150, 58, 'BACK', 0x34495e, () => this.onBack(), 24).setDepth(1000);
     this.tokens = tokenPill(this, W - 112, 46, this.prof.tokens);
+    this.cash = tokenPill(this, W - 112, 112, this.prof.money, 'cash');
+    this.flashText = txt(this, W / 2, 560, '', 40, { strokeThickness: 9 }).setDepth(900).setAlpha(0);
     this.sparks = this.add
       .particles(0, 0, 'spark', {
         speed: { min: 120, max: 380 },
@@ -91,7 +96,43 @@ export abstract class BattingBase extends Phaser.Scene {
       .setDepth(950.5);
   }
 
-  protected placeFig(c: Phaser.GameObjects.Container, x: number, y: number, ft = 4.4) {
+  protected onBack() {
+    goto(this, 'hub');
+  }
+
+  // Put nine kids on the field. `you` marks the position the player plays.
+  protected setDefense(lookOf: (id: string, i: number) => Look, you?: string) {
+    this.fielders.forEach((f) => f.c.destroy());
+    this.fielders = [];
+    FIELDERS.forEach((s, i) => {
+      let c: Phaser.GameObjects.Container;
+      if (s.id === 'P') {
+        this.pitcher = makePitcher(this, lookOf('P', i));
+        c = this.pitcher.c;
+      } else {
+        c = makeKid(this, lookOf(s.id, i), { glove: true });
+      }
+      if (s.id === you) {
+        const tag = txt(this, 0, -130, 'YOU', 46, { color: '#ffd23f', strokeThickness: 9 });
+        c.add(tag);
+        this.tweens.add({ targets: tag, y: -142, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      }
+      this.placeFig(c, s.x, s.y);
+      this.fielders.push({ c, id: s.id, x: s.x, y: s.y, hx: s.x, hy: s.y });
+    });
+  }
+
+  protected setBatter(look: Look | null) {
+    this.batter?.c.destroy();
+    this.batter = look ? new Batter(this, BATTER_X, BATTER_Y, look, (1.9 * this.lv.ft) / 4.4) : undefined;
+    this.batter?.c.setDepth(200);
+  }
+
+  protected fielder(id?: string) {
+    return this.fielders.find((f) => f.id === id);
+  }
+
+  protected placeFig(c: Phaser.GameObjects.Container, x: number, y: number, ft = this.lv.ft) {
     const p = project(x, y, 0);
     c.setPosition(p.x, p.y)
       .setScale((ft * p.s) / 100)
@@ -126,77 +167,69 @@ export abstract class BattingBase extends Phaser.Scene {
     const s = { ...this.bpos };
     const ex = o.dist * Math.sin(o.angle);
     const ey = o.dist * Math.cos(o.angle);
-    const roll = o.chase === 'field' ? 1.12 : 1;
-    const rx = ex * roll;
-    const ry = ey * roll;
-    const rollMs = 450;
-    const f = o.chase ? this.nearestFielder(rx, ry, !!o.grounder) : null;
+    const stop = o.stopAt ?? 1;
+    const u1 = Math.min(1, stop);
+    const pos = (u: number) => ({ x: s.x + (ex - s.x) * u, y: s.y + (ey - s.y) * u });
+    const f = this.fielder(o.who);
     if (f) {
-      if (o.chase === 'catch') this.runFielder(f, ex, ey, o.time, () => this.hop(f));
-      else {
-        const far = (Math.hypot(rx - f.x, ry - f.y) / 15) * 1000;
-        this.runFielder(f, rx, ry, Math.max(o.time + rollMs, far), () => {
-          this.hideBall();
-          this.hop(f);
-        });
+      if (o.stopAt !== undefined) {
+        const t = pos(u1);
+        this.runFielder(f, t.x, t.y, Math.max(150, stop * o.time), () => this.hop(f));
+      } else {
+        // A hit: the fielder chases it down where it stops.
+        this.runFielder(f, ex, ey, o.time + 450);
       }
     }
     return new Promise((resolve) => {
       this.tweens.addCounter({
         from: 0,
-        to: 1,
-        duration: o.time,
+        to: u1,
+        duration: Math.max(1, u1 * o.time),
         onUpdate: (tw) => {
           const u = tw.getValue() ?? 0;
-          const x = s.x + (ex - s.x) * u;
-          const y = s.y + (ey - s.y) * u;
+          const p = pos(u);
           const z = o.grounder
             ? s.z * (1 - u) * (1 - u) + 3.2 * Math.abs(Math.sin(u * Math.PI * 2.5)) * (1 - u)
             : s.z * (1 - u) + 4 * o.apex * u * (1 - u);
-          this.setBall(x, y, z);
+          this.setBall(p.x, p.y, z);
           this.ball.rotation += 0.35;
         },
         onComplete: () => {
-          if (o.chase === 'catch') {
+          if (o.stopAt === undefined) {
+            resolve();
+            return;
+          }
+          // The ball sat still until the fielder got there.
+          this.time.delayedCall(Math.max(0, (stop - u1) * o.time), () => {
             this.hideBall();
             resolve();
-            return;
-          }
-          if (roll === 1) {
-            resolve();
-            return;
-          }
-          this.tweens.addCounter({
-            from: 0,
-            to: 1,
-            duration: rollMs,
-            ease: 'Quad.easeOut',
-            onUpdate: (tw) => {
-              const k = tw.getValue() ?? 0;
-              this.setBall(ex + (rx - ex) * k, ey + (ry - ey) * k, 1.5 * Math.sin(Math.PI * k));
-            },
-            onComplete: () => resolve(),
           });
         },
       });
     });
   }
 
-  private nearestFielder(x: number, y: number, includePitcher: boolean) {
-    let best: Fielder | null = null;
-    let bd = Infinity;
-    for (const f of this.fielders) {
-      if (f.id === 'P' && !includePitcher) continue;
-      const d = Math.hypot(f.x - x, f.y - y);
-      if (d < bd) {
-        bd = d;
-        best = f;
-      }
-    }
-    return best;
+  // A throw from one spot on the field to another.
+  protected throwBall(from: { x: number; y: number }, to: { x: number; y: number }, ms: number): Promise<void> {
+    this.setBall(from.x, from.y, 4);
+    return new Promise((resolve) => {
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: ms,
+        onUpdate: (tw) => {
+          const k = tw.getValue() ?? 0;
+          this.setBall(from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k, 4 + 10 * k * (1 - k));
+        },
+        onComplete: () => {
+          this.hideBall();
+          resolve();
+        },
+      });
+    });
   }
 
-  private runFielder(f: Fielder, tx: number, ty: number, dur: number, onArrive?: () => void) {
+  protected runFielder(f: Fielder, tx: number, ty: number, dur: number, onArrive?: () => void) {
     const sx = f.x;
     const sy = f.y;
     this.tweens.addCounter({
@@ -215,51 +248,36 @@ export abstract class BattingBase extends Phaser.Scene {
     });
   }
 
-  private hop(f: Fielder) {
+  protected hop(f: Fielder) {
     this.tweens.add({ targets: f.c, y: f.c.y - 14 * f.c.scaleY, duration: 160, yoyo: true, ease: 'Quad.easeOut' });
   }
 
   protected resetFielders() {
     for (const f of this.fielders) {
+      if (f.c.angle !== 0) this.tweens.add({ targets: f.c, angle: 0, duration: 300 });
       if (f.x !== f.hx || f.y !== f.hy) this.runFielder(f, f.hx, f.hy, 700);
     }
   }
 
-  protected runBases(bases: number): Promise<void> {
-    const path = BASE_PATH.slice(0, bases + 1);
-    const runner = makeKid(this, this.look);
-    this.placeFig(runner, path[0].x, path[0].y, 4.2);
-    return new Promise((resolve) => {
-      this.tweens.addCounter({
-        from: 0,
-        to: bases,
-        duration: 900 * bases,
-        onUpdate: (tw) => {
-          const v = tw.getValue() ?? 0;
-          const i = Math.min(bases - 1, Math.floor(v));
-          const k = v - i;
-          const a = path[i];
-          const b = path[i + 1];
-          this.placeFig(runner, a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 4.2);
-          runner.y -= Math.abs(Math.sin(v * Math.PI * 7)) * 8 * runner.scaleY;
-        },
-        onComplete: () => {
-          this.tweens.add({ targets: runner, y: runner.y - 22 * runner.scaleY, duration: 200, yoyo: true, repeat: 1 });
-          resolve();
-        },
-      });
-    });
-  }
-
   protected banner(text: string, color = '#ffd23f', sub?: string, hold = 1100) {
     this.bannerObjs.forEach((o) => o.destroy());
-    this.bannerObjs = [txt(this, W / 2, 245, text, 96, { color, strokeThickness: 16 }).setDepth(900)];
+    const size = text.length > 12 ? 76 : 96;
+    this.bannerObjs = [txt(this, W / 2, 245, text, size, { color, strokeThickness: 16 }).setDepth(900)];
     if (sub) this.bannerObjs.push(txt(this, W / 2, 325, sub, 32, { strokeThickness: 8 }).setDepth(900));
     this.bannerObjs.forEach((o, i) => {
       o.setScale(0.3).setAlpha(0);
       this.tweens.add({ targets: o, scale: 1, alpha: 1, duration: 320, delay: i * 90, ease: 'Back.easeOut' });
       this.tweens.add({ targets: o, alpha: 0, delay: hold + 400, duration: 300, onComplete: () => o.destroy() });
     });
+  }
+
+  // A quick callout, like "STRIKE!" or "PERFECT TIMING!".
+  protected flash(s: string, color = '#ffffff', x = W / 2, y = 560) {
+    const t = this.flashText;
+    this.tweens.killTweensOf(t);
+    t.setPosition(x, y).setText(s).setColor(color).setAlpha(1).setScale(0.6);
+    this.tweens.add({ targets: t, scale: 1, duration: 200, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, delay: 1000, duration: 300 });
   }
 
   protected fireworks(n: number) {
@@ -275,8 +293,8 @@ export abstract class BattingBase extends Phaser.Scene {
     this.time.delayedCall(ms, () => this.confetti.stop());
   }
 
-  // Coins fly from (fromX, fromY) into the token counter, which counts up from `before`.
-  protected awardTokens(n: number, fromX: number, fromY: number, before: number): Promise<void> {
+  // Coins or bills fly from (fromX, fromY) into a counter, which counts up from `before`.
+  protected award(pill: TokenPill, kind: 'coin' | 'cash', n: number, fromX: number, fromY: number, before: number): Promise<void> {
     const shown = Math.min(n, 10);
     return new Promise((resolve) => {
       if (n <= 0) {
@@ -284,18 +302,20 @@ export abstract class BattingBase extends Phaser.Scene {
         return;
       }
       for (let i = 0; i < shown; i++) {
-        const c = this.add.image(fromX, fromY, 'coin').setDisplaySize(52, 52).setDepth(1100);
+        const c = this.add.image(fromX, fromY, kind).setDepth(1100);
+        if (kind === 'cash') c.setDisplaySize(64, 40);
+        else c.setDisplaySize(52, 52);
         this.tweens.add({
           targets: c,
-          x: this.tokens.coinX,
-          y: this.tokens.coinY,
+          x: pill.coinX,
+          y: pill.coinY,
           scale: c.scale * 0.8,
           delay: 250 + i * 120,
           duration: 600,
           ease: 'Cubic.easeIn',
           onComplete: () => {
             c.destroy();
-            this.tokens.set(i === shown - 1 ? before + n : before + Math.round(((i + 1) * n) / shown));
+            pill.set(i === shown - 1 ? before + n : before + Math.round(((i + 1) * n) / shown));
             sfx.coin();
             if (i === shown - 1) resolve();
           },

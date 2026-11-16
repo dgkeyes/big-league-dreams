@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { W, H, setupCamera, goto, Btn, txt, INK } from '../ui';
 import { drawField } from '../field';
 import { makeKid } from '../figures';
-import { LEAGUES, Gender, LeagueId, loadProfile, saveProfile, lookFor, leagueOf } from '../data';
+import { LEAGUES, Gender, LeagueId, loadProfile, getProfile, saveProfile, lookFor, leagueOf, levelOf, ageOf } from '../data';
 
 // Make your player: boy or girl, and one of the four Portland leagues.
 export class SetupScene extends Phaser.Scene {
@@ -40,7 +40,8 @@ export class SetupScene extends Phaser.Scene {
     txt(this, 300, 236, 'YOU!', 40, { color: '#ffd23f' });
     this.add.ellipse(300, 596, 220, 44, 0x45a849);
     this.leagueText = txt(this, 300, 640, '', 28, { color: INK, strokeThickness: 0, wrap: 340 });
-    txt(this, 300, 690, 'Age 5  ·  T-Ball', 24, { body: true, color: '#5b6b88' });
+    const p = getProfile();
+    txt(this, 300, 690, `Age ${ageOf(p)}  ·  ${levelOf(p).name}`, 24, { body: true, color: '#5b6b88' });
 
     // 1. boy or girl
     txt(this, 820, 200, '1. Who are you?', 30);
@@ -76,7 +77,7 @@ export class SetupScene extends Phaser.Scene {
 
     this.kid?.destroy();
     // Before a league is picked the player wears a plain gray practice shirt.
-    const look = lookFor(this.gender, this.league ?? 'npdx');
+    const look = lookFor(this.gender, this.league ?? 'npdx', getProfile());
     if (!this.league) {
       look.jersey = 0xadb5bd;
       look.cap = 0x6c757d;
@@ -88,14 +89,10 @@ export class SetupScene extends Phaser.Scene {
 
   private start() {
     if (!this.league) return;
-    const prev = loadProfile();
-    saveProfile({
-      gender: this.gender,
-      league: this.league,
-      tokens: prev?.tokens ?? 0,
-      questDone: prev?.questDone ?? false,
-      atBats: prev?.atBats ?? 0,
-    });
+    const p = getProfile();
+    p.gender = this.gender;
+    p.league = this.league;
+    saveProfile(p);
     goto(this, 'hub');
   }
 }
