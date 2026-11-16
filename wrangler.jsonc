@@ -1,0 +1,13 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "big-league-dreams",
+    "compatibility_date": "2026-11-01",
+    // The game is fully static: Cloudflare serves the Vite build with no Worker code.
+    "assets": {
+        "directory": "./dist",
+        "not_found_handling": "single-page-application"
+    },
+    "routes": [
+        { "pattern": "bigleaguedreams.eliaskeyes.com", "custom_domain": true }
+    ]
+}
