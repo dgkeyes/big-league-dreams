@@ -72,7 +72,7 @@ export class Fielding {
   }
 
   private gloveRest() {
-    this.glove.position.set(-0.78, -0.56, -1.6);
+    this.glove.position.set(-0.48, -0.26, -1.6);
     this.glove.rotation.set(0.2, 0.3, 0.3);
   }
 
