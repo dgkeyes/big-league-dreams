@@ -3,7 +3,7 @@ import { register, go, type Screen } from '../app';
 import { clock } from '../clock';
 import {
   getProfile, saveProfile, leagueOf, levelOf, skillsOf, kitOf, uniformOf, teamKids, displayName, finishGame, bump,
-  LEAGUES, POSITIONS, type Pos, type Profile, type SkillId,
+  LEAGUES, POSITIONS, GAMES_PER_LEVEL, type Pos, type Profile, type SkillId,
 } from '../data';
 import { cpuPA, judge, resolve, type Bases, type BattedBall, type Outcome, type Play, type Swing } from '../play';
 import type { Kid, Look } from '../gfx/kid';
@@ -76,6 +76,12 @@ export function gameScreen(arg?: unknown): Screen {
   const diveBtn = pad('DIVE', () => fielding.dive(), 'mid dive');
   const throwBtn = pad('THROW TO 1ST', () => fielding.throwNow(), 'big throw');
   const fieldCtl = div('ctl field-ctl', diveBtn, fieldBtn, throwBtn);
+  // After a hit, you pick how many bases to run. Going past what the hit gives you is a gamble.
+  let runPick: ((n: number) => void) | null = null;
+  const runBtns = ['1ST', '2ND', '3RD', 'HOME'].map((name, i) =>
+    pad(i === 3 ? 'GO HOME!' : `${i === 0 ? 'STOP AT' : 'GO TO'} ${name}`, () => runPick?.(i + 1), 'run-btn'),
+  );
+  const runCtl = div('run-ctl hidden', h('div', 'run-title', 'HOW FAR WILL YOU RUN?'), div('run-row', ...runBtns));
   let pitchGo: (() => void) | null = null;
   const pitchBtn = pad('PITCH', () => pitchGo?.(), 'big pitch');
   const stickWrap = div('stick-wrap', joy.el);
@@ -91,7 +97,7 @@ export function gameScreen(arg?: unknown): Screen {
     'modal hidden',
     div('card', h('h2', '', 'Leave the game?'), h('p', '', "It won't count, and you won't get paid."), div('row', btn('KEEP PLAYING', () => show(quitCard, false), 'green'), btn('LEAVE', () => go('hub'), 'red'))),
   );
-  ui.append(board, div('top-right', ffBtn, quitBtn), ticker, msg, batCtl, fieldCtl, pitchBtn, stickWrap, quitCard);
+  ui.append(board, div('top-right', ffBtn, quitBtn), ticker, msg, batCtl, fieldCtl, runCtl, pitchBtn, stickWrap, quitCard);
 
   let watching = true;
   type HudMode = 'watch' | 'bat' | 'field';
@@ -300,7 +306,7 @@ export function gameScreen(arg?: unknown): Screen {
   async function yourPA(pitcher: Kid | null) {
     hudMode('bat');
     park.setBatter(null);
-    tick(`${displayName(prof).toUpperCase()} IS UP!`);
+    tick(prof.name.trim() ? `${displayName(prof).toUpperCase()} IS UP!` : 'YOUR TURN!');
     stats.pa++;
     const r = await batting.atBat(pitcher, { model: 'game', speed: () => rnd(lv.pitch[0], lv.pitch[1]), strikeRate: lv.tee ? 0.92 : 0.6, cpu: lv.cpu }, lv.tee);
     batting.leave();
@@ -323,18 +329,29 @@ export function gameScreen(arg?: unknown): Screen {
     }
     stats.ab++;
     const play = judge(r.b, lv.def, sk().speed);
-    const o = outcomeOf(r.b, play, r.swing);
+    let o = outcomeOf(r.b, play, r.swing);
     if (play.res === 'HR') {
       sfx.cheer(2.6);
       park.fireworks(5);
     }
     const before = score.you;
-    await Promise.all([showPlay(r.b, play, lv.ft * 0.5), clock.wait(0.25).then(() => moveRunners(me, o, runFps(sk().speed)))]);
+    const isHit = !play.error && (play.res === '1B' || play.res === '2B' || play.res === '3B');
+    let homer = play.res === 'HR';
+    if (isHit) {
+      // Watch the ball land, then decide how far to run.
+      await showPlay(r.b, play, lv.ft * 0.5);
+      const got = ['1B', '2B', '3B'].indexOf(play.res) + 1;
+      o = await chooseBases(r.b, got);
+      homer = o.batter === 'home';
+      await moveRunners(me, o, runFps(sk().speed));
+    } else {
+      await Promise.all([showPlay(r.b, play, lv.ft * 0.5), clock.wait(0.25).then(() => moveRunners(me, o, runFps(sk().speed)))]);
+    }
     applyOutcome(o, 'you');
     stats.rbi += score.you - before;
-    if (o.hit) stats.hits++;
-    if (play.res === 'HR') stats.hr++;
-    say(o.label, play.res === 'HR' ? 'WAY TO GO!' : o.runs ? `${o.runs} run${o.runs > 1 ? 's' : ''} scored!` : '', o.hit ? '#ffd23f' : '#ffffff');
+    if (o.hit || isHit) stats.hits++;
+    if (homer) stats.hr++;
+    say(o.label, homer ? 'WAY TO GO!' : o.runs ? `${o.runs} run${o.runs > 1 ? 's' : ''} scored!` : '', o.hit ? '#ffd23f' : '#ffffff');
     if (o.hit) sfx.cheer(1.5);
     else sfx.aww();
     await clock.wait(1.2);
@@ -351,6 +368,39 @@ export function gameScreen(arg?: unknown): Screen {
     await cpuPitch(pitcher, from, k, pa.kind);
     park.batter = null;
     await afterCpuPitch(pa, k, 'you');
+  }
+
+  // Ask how many bases to run after a hit worth `got` bases. Stopping short is always safe;
+  // each extra base is riskier, and faster runners make it more often.
+  async function chooseBases(b: BattedBall, got: number): Promise<Outcome> {
+    const p1 = Math.min(0.85, Math.max(0.3, 0.45 + (sk().speed - 40) / 150));
+    const odds = [1, p1, p1 * 0.4, p1 * 0.15];
+    runBtns.forEach((btn, i) => {
+      const extra = i + 1 - got;
+      btn.classList.toggle('safe', extra <= 0);
+      btn.classList.toggle('risky', extra === 1);
+      btn.classList.toggle('wild', extra > 1);
+    });
+    show(runCtl, true);
+    const auto = import.meta.env.DEV && (window as unknown as { __autoRun?: number }).__autoRun;
+    const pick = await new Promise<number>((res) => {
+      runPick = res;
+      if (auto) void clock.wait(0.5).then(() => res(Math.min(4, auto === -1 ? got : got + auto)));
+    });
+    runPick = null;
+    show(runCtl, false);
+    const extra = pick - got;
+    const asRes = (n: number) => (['1B', '2B', '3B', 'HR'] as const)[n - 1];
+    if (extra <= 0) return resolve(asRes(pick), b, bases, outs);
+    if (Math.random() < odds[extra]) {
+      const o = resolve(asRes(pick), b, bases, outs);
+      return { ...o, label: pick === 4 ? 'INSIDE-THE-PARK HOME RUN!' : `STRETCHED IT TO ${['', '1ST', '2ND', '3RD'][pick]}!` };
+    }
+    // Thrown out going for the extra base. The other runners still move up as the hit allowed.
+    const o = resolve(asRes(got), b, bases, outs);
+    const next: Bases = [...o.bases];
+    next[got - 1] = false;
+    return { ...o, bases: next, outs: outs + 1, batter: 'out', hit: false, label: `OUT AT ${['', '1ST', '2ND', '3RD', 'HOME'][pick]}!` };
   }
 
   function outcomeOf(b: BattedBall, play: Play, swing: Swing) {
@@ -546,7 +596,7 @@ export function gameScreen(arg?: unknown): Screen {
         h('p', '', `You went ${stats.hits} for ${stats.ab}${stats.hr ? ` with ${stats.hr} home run${stats.hr > 1 ? 's' : ''}` : ''}${stats.rbi ? `, ${stats.rbi} RBI` : ''}. ${stats.plays ? `${stats.plays} play${stats.plays > 1 ? 's' : ''} in the field.` : ''}`),
         div('row', pill('cash', `+${cash}`), tokens ? pill('token', `+${tokens}`) : null),
         h('p', 'gains', gains.map((g) => `${g[0].toUpperCase()}${g.slice(1)} +1`).join('   ')),
-        moved ? h('h2', 'gold', `YOU MOVED UP TO ${levelOf(p).name.toUpperCase()}!`) : mode === 'game' ? h('p', '', `${p.gamesAtLevel} of 10 games at ${levelOf(p).name}`) : null,
+        moved ? h('h2', 'gold', `YOU MOVED UP TO ${levelOf(p).name.toUpperCase()}!`) : mode === 'game' ? h('p', '', `${p.gamesAtLevel} of ${GAMES_PER_LEVEL} games at ${levelOf(p).name}`) : null,
         btn('BACK HOME', () => go('hub'), 'green big-btn'),
       ),
     );

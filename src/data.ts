@@ -69,8 +69,8 @@ export interface Level {
   ft: number;
 }
 
-// Elias: every game is 9 innings, and you move up after 10 games (or one game with a homer every at-bat).
-export const GAMES_PER_LEVEL = 10;
+// Elias: every game is 9 innings, and you move up after 5 games (or one game with a homer every at-bat).
+export const GAMES_PER_LEVEL = 5;
 export const LEVELS: Level[] = [
   { id: 'tball', name: 'T-Ball', age: 5, innings: 9, cpu: 38, def: 0, kRate: 0, bbRate: 0, bunts: false, tee: true, runLimit: 5, pitch: [24, 30], pitchDist: 30, ft: 4.1 },
   { id: 'little', name: 'Little League', age: 8, innings: 9, cpu: 50, def: 20, kRate: 0.17, bbRate: 0.11, bunts: true, tee: false, runLimit: 0, pitch: [40, 52], pitchDist: 46, ft: 4.7 },
@@ -251,19 +251,25 @@ export function bump(p: Profile, id: SkillId, n = 1) {
   p.skills[id] = Math.min(99, p.skills[id] + n);
 }
 
-// Count a finished game. Returns true when the player moves up a level.
-export function finishGame(p: Profile, result: 'W' | 'L' | 'T', homerEveryAB: boolean) {
+// Count a finished game. A day Dad said no baseball ('sat') counts toward moving up but not the record.
+// Returns true when the player moves up a level.
+export function finishGame(p: Profile, result: 'W' | 'L' | 'T' | 'sat', homerEveryAB = false) {
   p.games++;
   p.gamesAtLevel++;
   if (result === 'W') p.wins++;
   else if (result === 'L') p.losses++;
-  else p.ties++;
+  else if (result === 'T') p.ties++;
   if (p.level < LEVELS.length - 1 && (p.gamesAtLevel >= GAMES_PER_LEVEL || homerEveryAB)) {
-    p.level++;
-    p.gamesAtLevel = 0;
+    moveUp(p);
     return true;
   }
   return false;
+}
+
+export function moveUp(p: Profile) {
+  if (p.level >= LEVELS.length - 1) return;
+  p.level++;
+  p.gamesAtLevel = 0;
 }
 
 export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
