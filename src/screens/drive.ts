@@ -9,7 +9,7 @@ import { div, btn, banner } from '../ui';
 import { sfx } from '../sfx';
 
 export const DAD_LOOK: Look = { gender: 'boy', skin: 0xf1c27d, hair: 0x4a2e17, hairStyle: 'short', eyes: 0x4a2e17, number: 1 };
-export const DAD_CLOTHES = { jersey: 0x2f9e44, cap: 0x343a40, pants: 0x364fc7, socks: 0x343a40 };
+export const DAD_CLOTHES = { jersey: 0x2f9e44, cap: 0x343a40, pants: 0x3c5a8a, socks: 0x343a40, casual: true };
 
 export function car(color = 0x1c7ed6) {
   const g = new THREE.Group();
@@ -146,14 +146,14 @@ export function driveScreen(): Screen {
   scene.add(auto);
   // Dad drives, you ride up front next to him.
   const dad = new Kid(DAD_LOOK, DAD_CLOTHES, {}, 5.9);
-  dad.position.set(1.4, 2.3, -0.8);
+  dad.position.set(1.4, 1.5, -0.8);
   dad.pose('sit');
-  dad.body.scale.multiplyScalar(0.55);
+  dad.body.scale.multiplyScalar(0.62);
   auto.add(dad);
-  const me = new Kid(prof.look, { jersey: 0xff922b, cap: 0x1971c2, pants: 0x364fc7, socks: 0xffffff }, {}, 4.1);
-  me.position.set(-1.4, 2.6, -0.8);
+  const me = new Kid(prof.look, { jersey: 0xff922b, cap: 0x1971c2, pants: 0x3c5a8a, socks: 0xe53e3e, casual: true }, {}, 4.1);
+  me.position.set(-1.4, 1.8, -0.8);
   me.pose('sit');
-  me.body.scale.multiplyScalar(0.6);
+  me.body.scale.multiplyScalar(0.75);
   auto.add(me);
   auto.rotation.y = Math.PI;
 

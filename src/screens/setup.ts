@@ -48,11 +48,15 @@ export function setupScreen(arg?: unknown): Screen {
   let kid: Kid | null = null;
   let spin = 0.5;
   const rebuild = () => {
-    if (kid) scene.remove(kid);
+    if (kid) {
+      scene.remove(kid);
+      kid.char.dispose();
+    }
     kid = new Kid(prof.look, uniformOf(leagueOf(prof.league)), kitOf(prof), 4.4);
     kid.rotation.y = spin;
     kid.position.x = 0;
     scene.add(kid);
+    if (import.meta.env.DEV) Object.assign(window, { __kid: kid });
   };
 
   const ui = div('screen setup');
@@ -171,7 +175,7 @@ export function setupScreen(arg?: unknown): Screen {
       if (kid) {
         kid.rotation.y = spin;
         kid.pose('stand');
-        kid.head.rotation.y = Math.sin(t * 1.3) * 0.15;
+        kid.lookYaw = Math.sin(t * 1.3) * 0.15;
       }
     },
   };

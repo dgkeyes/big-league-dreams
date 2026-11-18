@@ -129,7 +129,7 @@ export function storeScreen(): Screen {
   const dad = new Kid(DAD_LOOK, DAD_CLOTHES, {}, 5.9);
   dad.setField(3, -2);
   dad.face(0, 1);
-  dad.glove.visible = false;
+  dad.gloveOn = false;
   scene.add(dad);
 
   if (import.meta.env.DEV) Object.assign(window, { __store: { me, dad } });
