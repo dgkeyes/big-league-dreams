@@ -1,42 +1,14 @@
-// A 3D cartoon kid in a baseball uniform, posed by rotating simple joints.
-// The model faces +z, and its left side is +x. It is built 4 units tall and scaled to the level's height in feet.
+// A ballplayer built on the characters from Leila's game (Sabin Elementary): rigged Quaternius bodies with
+// clothes painted on, real hair, and animation clips. This wrapper keeps the baseball code's simple
+// interface (pose, face, setField) and adds what baseball needs: a uniform with a real jersey number,
+// a cap, a glove, a bat, and batting, bunting, and diving poses made with two-bone IK.
+// The model faces +z, and its left side is +x. World units are feet; the kid is heightFt tall.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { part, geo, toon, textTexture, blobShadow } from './toon';
-
-// Merge the meshes hanging directly off one joint into one mesh per material. A kid has dozens of parts,
-// and a field has twenty kids, so this keeps the draw calls down on an iPad.
-function mergeJoint(j: THREE.Group, keep: Set<THREE.Object3D>) {
-  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  const used: THREE.Object3D[] = [];
-  const add = (m: THREE.Mesh, matrix: THREE.Matrix4) => {
-    let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-    for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
-    g = g.applyMatrix4(matrix);
-    const mat = m.material as THREE.Material;
-    byMat.set(mat, [...(byMat.get(mat) ?? []), g]);
-  };
-  for (const c of j.children) {
-    const m = c as THREE.Mesh;
-    if (!m.isMesh || keep.has(m) || (m.material as THREE.MeshBasicMaterial).map) continue;
-    m.updateMatrix();
-    add(m, m.matrix);
-    for (const o of m.children) {
-      const om = o as THREE.Mesh;
-      if (!om.isMesh) continue;
-      om.updateMatrix();
-      add(om, m.matrix.clone().multiply(om.matrix));
-    }
-    used.push(m);
-  }
-  if (used.length < 2) return;
-  for (const u of used) j.remove(u);
-  for (const [mat, list] of byMat) {
-    const merged = mergeGeometries(list);
-    list.forEach((g) => g.dispose());
-    if (merged) j.add(new THREE.Mesh(merged, mat));
-  }
-}
+import { Character, type AnimName } from '../characters/character';
+import { getAssets } from '../characters/assets';
+import { BODY_LANDMARKS } from '../characters/lookShader';
+import type { Look as SabinLook } from '../characters/types';
+import { textTexture } from './toon';
 
 export type HairStyle = 'short' | 'buzz' | 'curly' | 'ponytail' | 'long' | 'mullet';
 export interface Look {
@@ -52,6 +24,8 @@ export interface Uniform {
   cap: number;
   pants: number;
   socks: number;
+  // Street clothes (Dad, or you on the way to the store) instead of a baseball uniform.
+  casual?: boolean;
 }
 export interface Kit {
   bat?: number;
@@ -61,50 +35,74 @@ export interface Kit {
 
 export type PoseName = 'stand' | 'walk' | 'run' | 'ready' | 'bat' | 'swing' | 'bunt' | 'throw' | 'dive' | 'cheer' | 'sit' | 'crouch' | 'sad';
 
-const shellCache = new Map<string, THREE.BufferGeometry>();
-// Part of a sphere around the back and sides of the head, for hair under the cap.
-function shell(r: number, t0: number, t1: number) {
-  const k = `${r}:${t0}:${t1}`;
-  let g = shellCache.get(k);
-  if (!g) {
-    g = new THREE.SphereGeometry(r, 18, 8, Math.PI - 0.5, Math.PI + 1, t0, t1 - t0);
-    shellCache.set(k, g);
-  }
-  return g;
-}
-let domeGeo: THREE.BufferGeometry | null = null;
-let smileGeo: THREE.BufferGeometry | null = null;
-const numberMats = new Map<string, THREE.MeshBasicMaterial>();
+const HAIR_IDS: Record<HairStyle, string> = {
+  short: 'parted',
+  buzz: 'short',
+  curly: 'afro',
+  ponytail: 'ponytail',
+  long: 'long',
+  mullet: 'mullet',
+};
 
-function grp(parent: THREE.Object3D, x: number, y: number, z: number) {
-  const g = new THREE.Group();
-  g.position.set(x, y, z);
-  parent.add(g);
-  return g;
-}
-
+const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const ease = (t: number) => t * t * (3 - 2 * t);
+const _v = new THREE.Vector3();
+const _w = new THREE.Vector3();
+const _x = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _qw = new THREE.Quaternion();
+const _qp = new THREE.Quaternion();
+const UP = new THREE.Vector3(0, 1, 0);
+
+// Rotate a bone in world space so the direction to its child joint points along `dir` (world).
+function aim(bone: THREE.Bone, child: THREE.Bone, dir: THREE.Vector3) {
+  const p0 = bone.getWorldPosition(_v);
+  const cur = child.getWorldPosition(_w).sub(p0).normalize();
+  _q.setFromUnitVectors(cur, _x.copy(dir).normalize());
+  bone.getWorldQuaternion(_qw).premultiply(_q);
+  bone.parent!.getWorldQuaternion(_qp);
+  bone.quaternion.copy(_qp.invert().multiply(_qw));
+  bone.updateMatrixWorld(true);
+}
+
+// Two-bone IK: bend shoulder and elbow so the wrist reaches `target`, with the elbow toward `pole` (all world).
+function reach(upper: THREE.Bone, lower: THREE.Bone, hand: THREE.Bone, target: THREE.Vector3, pole: THREE.Vector3) {
+  const s = upper.getWorldPosition(new THREE.Vector3());
+  const a = lower.getWorldPosition(new THREE.Vector3()).distanceTo(s);
+  const b = hand.getWorldPosition(new THREE.Vector3()).distanceTo(lower.getWorldPosition(new THREE.Vector3()));
+  const toT = target.clone().sub(s);
+  const d = THREE.MathUtils.clamp(toT.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
+  const dir = toT.normalize();
+  const cosA = (a * a + d * d - b * b) / (2 * a * d);
+  const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+  const bend = pole.clone().sub(s);
+  bend.sub(dir.clone().multiplyScalar(bend.dot(dir))).normalize();
+  const elbow = s.clone().add(dir.clone().multiplyScalar(a * cosA)).add(bend.multiplyScalar(a * sinA));
+  aim(upper, lower, elbow.clone().sub(s));
+  aim(lower, hand, target.clone().sub(lower.getWorldPosition(new THREE.Vector3())));
+}
+
+// Every kid on screen, so the main loop can animate them.
+const live = new Set<Kid>();
 
 export class Kid extends THREE.Group {
+  // Scales the character (meters) to the kid's height in feet. Drive scales it down to fit in the car.
   readonly body = new THREE.Group();
-  readonly hips: THREE.Group;
-  readonly torso: THREE.Group;
-  readonly head: THREE.Group;
-  readonly shL: THREE.Group;
-  readonly shR: THREE.Group;
-  readonly elL: THREE.Group;
-  readonly elR: THREE.Group;
-  readonly hipL: THREE.Group;
-  readonly hipR: THREE.Group;
-  readonly knL: THREE.Group;
-  readonly knR: THREE.Group;
-  readonly handR: THREE.Group;
-  readonly handL: THREE.Group;
-  readonly bat: THREE.Group;
-  readonly glove: THREE.Mesh;
+  readonly char: Character;
+  readonly glove: THREE.Object3D;
+  readonly bat: THREE.Object3D;
   readonly sc: number;
-  private joints: THREE.Group[];
+  // Turns the head left and right (radians), for idle screens.
+  lookYaw = 0;
+  // Hide the glove for good (Dad at the store).
+  gloveOn = true;
+  private state: PoseName = 'stand';
+  private k = 0;
+  private last = new THREE.Vector3();
+  private speed = 0;
+  // Root-local character height in meters.
+  private H: number;
 
   constructor(
     public look: Look,
@@ -113,201 +111,57 @@ export class Kid extends THREE.Group {
     public heightFt = 4,
   ) {
     super();
-    const s = (this.sc = heightFt / 4);
-    this.body.scale.setScalar(s);
+    const adult = heightFt > 5.2;
+    const body = look.gender === 'girl' ? 'f' : 'm';
+    this.char = new Character(
+      { body, skin: hex(look.skin), eyes: hex(look.eyes), freckles: false, glasses: false, height: 1, build: adult ? 1.04 : 1 },
+      sabinLook(look, uni, kit),
+      !adult,
+    );
+    const asset = getAssets().bodies[body];
+    this.H = asset.height * this.char.scale;
+    this.sc = heightFt / this.H;
+    this.body.scale.setScalar(this.sc);
+    this.body.add(this.char.root);
     this.add(this.body);
-    this.add(blobShadow(0.85 * s));
+    if (!uni.casual) this.addNumbers(look.number, body);
 
-    this.hips = grp(this.body, 0, 1.65, 0);
-    const pants = part(geo.capsule(0.36, 0.2), uni.pants, 0.04);
-    pants.scale.set(1.15, 1, 0.85);
-    this.hips.add(pants);
-    const legs: THREE.Group[] = [];
-    const knees: THREE.Group[] = [];
-    for (const side of [1, -1]) {
-      const hip = grp(this.hips, side * 0.2, -0.05, 0);
-      const thigh = part(geo.capsule(0.16, 0.42), uni.pants, 0.04);
-      thigh.position.y = -0.35;
-      hip.add(thigh);
-      const knee = grp(hip, 0, -0.78, 0);
-      const shin = part(geo.capsule(0.13, 0.42), uni.socks, 0.04);
-      shin.position.y = -0.3;
-      knee.add(shin);
-      const shoe = part(geo.box(0.27, 0.17, 0.46), kit.cleats ?? 0x2b2b35, 0.03);
-      shoe.position.set(0, -0.72, 0.09);
-      knee.add(shoe);
-      legs.push(hip);
-      knees.push(knee);
-    }
-    [this.hipL, this.hipR] = legs;
-    [this.knL, this.knR] = knees;
-
-    this.torso = grp(this.hips, 0, 0.1, 0);
-    const jersey = part(geo.capsule(0.42, 0.55), uni.jersey, 0.04);
-    jersey.position.y = 0.5;
-    jersey.scale.set(1.08, 1, 0.8);
-    this.torso.add(jersey);
-    const belt = new THREE.Mesh(geo.cyl(0.43, 0.43, 0.1, 16), toon(0x24242c));
-    belt.scale.set(1.12, 1, 0.84);
-    belt.position.y = 0.02;
-    this.torso.add(belt);
-    // The jersey number, on the back and smaller on the front.
-    const key = `${look.number}:${uni.jersey}`;
-    let nm = numberMats.get(key);
-    if (!nm) {
-      nm = new THREE.MeshBasicMaterial({
-        map: textTexture(String(look.number), { w: 128, h: 128, stroke: '#1d1b2f', size: 92 }),
-        transparent: true,
-      });
-      numberMats.set(key, nm);
-    }
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.58), nm);
-    back.position.set(0, 0.62, -0.345);
-    back.rotation.y = Math.PI;
-    this.torso.add(back);
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3), nm);
-    front.position.set(-0.2, 0.75, 0.345);
-    this.torso.add(front);
-
-    const arms: THREE.Group[] = [];
-    const elbows: THREE.Group[] = [];
-    const hands: THREE.Group[] = [];
-    for (const side of [1, -1]) {
-      const sh = grp(this.torso, side * 0.52, 0.98, 0);
-      const upper = part(geo.capsule(0.13, 0.3), uni.jersey, 0.04);
-      upper.position.y = -0.22;
-      sh.add(upper);
-      const el = grp(sh, 0, -0.5, 0);
-      const fore = part(geo.capsule(0.1, 0.28), look.skin, 0.035);
-      fore.position.y = -0.2;
-      el.add(fore);
-      const hand = grp(el, 0, -0.46, 0);
-      const fist = part(geo.sphere(0.12, 10), look.skin, 0.03);
-      hand.add(fist);
-      arms.push(sh);
-      elbows.push(el);
-      hands.push(hand);
-    }
-    [this.shL, this.shR] = arms;
-    [this.elL, this.elR] = elbows;
-    [this.handL, this.handR] = hands;
-
-    this.glove = part(geo.sphere(0.27, 12), kit.glove ?? 0x9a5a2b, 0.035);
-    this.glove.scale.set(0.95, 1.05, 0.55);
-    this.glove.position.set(0.04, -0.05, 0.06);
-    this.handL.add(this.glove);
-
+    // A glove on the left hand and a bat for the right, placed on the hands each frame.
+    const gMat = new THREE.MeshStandardMaterial({ color: kit.glove ?? 0x9a5a2b, roughness: 0.75 });
+    this.glove = new THREE.Mesh(new THREE.SphereGeometry(0.075 * heightFt, 14, 10), gMat);
+    this.glove.scale.set(0.8, 1.05, 0.45);
+    this.glove.visible = !uni.casual;
+    this.add(this.glove);
     this.bat = new THREE.Group();
-    const barrel = part(geo.cyl(0.075, 0.035, 1.75, 10), kit.bat ?? 0xd9a066, 0.025);
-    barrel.position.y = 0.72;
+    const len = heightFt * 0.58;
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03 * heightFt * 0.55, 0.012 * heightFt, len, 12),
+      new THREE.MeshStandardMaterial({ color: kit.bat ?? 0xd9a066, roughness: 0.55 }),
+    );
+    barrel.position.y = len / 2 - 0.04 * heightFt;
     this.bat.add(barrel);
-    const knob = new THREE.Mesh(geo.sphere(0.06, 8), toon(0x3b2614));
-    knob.position.y = -0.14;
-    this.bat.add(knob);
     this.bat.visible = false;
-    this.handR.add(this.bat);
-
-    this.head = grp(this.torso, 0, 1.2, 0);
-    this.buildHead(look, uni);
-
-    this.joints = [this.hips, this.torso, this.head, this.shL, this.shR, this.elL, this.elR, this.hipL, this.hipR, this.knL, this.knR, this.handR, this.handL];
-    const keep = new Set<THREE.Object3D>([this.glove]);
-    for (const j of this.joints) mergeJoint(j, keep);
+    this.add(this.bat);
+    live.add(this);
     this.pose('stand');
   }
 
-  private buildHead(look: Look, uni: Uniform) {
-    const h = this.head;
-    const skull = part(geo.sphere(0.52, 18), look.skin, 0.045);
-    skull.position.y = 0.45;
-    h.add(skull);
-    for (const side of [1, -1]) {
-      const ear = part(geo.sphere(0.12, 8), look.skin, 0.03);
-      ear.position.set(side * 0.52, 0.42, 0);
-      h.add(ear);
-      const white = new THREE.Mesh(geo.sphere(0.11, 10), toon(0xffffff));
-      white.scale.z = 0.5;
-      white.position.set(side * 0.18, 0.47, 0.46);
-      h.add(white);
-      const iris = new THREE.Mesh(geo.sphere(0.07, 10), toon(look.eyes));
-      iris.scale.z = 0.5;
-      iris.position.set(side * 0.18, 0.46, 0.505);
-      h.add(iris);
-      const pupil = new THREE.Mesh(geo.sphere(0.035, 8), toon(0x111111));
-      pupil.position.set(side * 0.18, 0.46, 0.53);
-      h.add(pupil);
-      const cheek = new THREE.Mesh(geo.sphere(0.07, 8), toon(0xff9aa2));
-      cheek.scale.z = 0.4;
-      cheek.position.set(side * 0.3, 0.3, 0.44);
-      h.add(cheek);
+  // The jersey number on the back, and smaller on the front, in the body's rest space so it follows the torso.
+  private addNumbers(n: number, body: 'f' | 'm') {
+    const L = BODY_LANDMARKS[body];
+    const mat = new THREE.MeshBasicMaterial({ map: textTexture(String(n), { w: 128, h: 128, color: '#ffffff', stroke: '#1d1b2f', size: 96 }), transparent: true, depthWrite: false, toneMapped: false });
+    // Measured from the smoothed bodies: the upper back leans out, so the back number tilts with it.
+    const m = body === 'm';
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.26), mat);
+    back.position.set(0, 1.24, m ? -0.165 : -0.138);
+    back.rotation.set(0.32, Math.PI, 0);
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(0.13, 0.13), mat);
+    front.position.set(0.07, 1.29, m ? 0.112 : 0.108);
+    void L;
+    for (const m of [back, front]) {
+      m.renderOrder = 2;
+      this.char.attach.get('spine_03')!.add(m);
     }
-    const nose = new THREE.Mesh(geo.sphere(0.06, 8), toon(look.skin));
-    nose.position.set(0, 0.36, 0.52);
-    h.add(nose);
-    if (!smileGeo) smileGeo = new THREE.TorusGeometry(0.1, 0.022, 6, 12, Math.PI);
-    const smile = new THREE.Mesh(smileGeo, toon(0x7a2a2a));
-    smile.position.set(0, 0.26, 0.48);
-    smile.rotation.z = Math.PI;
-    h.add(smile);
-
-    // Hair shows below the cap at the back and sides.
-    const hair = (g: THREE.BufferGeometry) => {
-      const m = new THREE.Mesh(g, toon(look.hair));
-      (m.material as THREE.Material).side = THREE.DoubleSide;
-      m.position.y = 0.45;
-      h.add(m);
-      return m;
-    };
-    if (look.hairStyle === 'buzz') hair(shell(0.53, 0.9, 1.75));
-    else hair(shell(0.55, 0.85, 1.95));
-    if (look.hairStyle === 'long') {
-      const l = part(geo.box(0.9, 0.75, 0.2), look.hair, 0.03);
-      l.position.set(0, 0.05, -0.38);
-      h.add(l);
-    } else if (look.hairStyle === 'ponytail') {
-      const tail = part(geo.capsule(0.14, 0.4), look.hair, 0.03);
-      tail.position.set(0, 0.3, -0.66);
-      tail.rotation.x = 0.5;
-      h.add(tail);
-      const tie = new THREE.Mesh(geo.sphere(0.1, 8), toon(uni.jersey));
-      tie.position.set(0, 0.5, -0.56);
-      h.add(tie);
-    } else if (look.hairStyle === 'mullet') {
-      // Business in the front, party in the back: short on top, long down the back of the neck.
-      const back = part(geo.box(0.78, 0.7, 0.22), look.hair, 0.03);
-      back.position.set(0, 0.02, -0.4);
-      back.rotation.x = -0.12;
-      h.add(back);
-      for (const side of [1, -1]) {
-        const flip = part(geo.capsule(0.11, 0.22), look.hair, 0.03);
-        flip.position.set(side * 0.3, -0.28, -0.46);
-        flip.rotation.set(0.5, 0, side * 0.5);
-        h.add(flip);
-      }
-    } else if (look.hairStyle === 'curly') {
-      for (let i = 0; i < 9; i++) {
-        const a = Math.PI - 1.5 + (i * 3) / 8;
-        for (const y of [0.15, 0.4]) {
-          const c = new THREE.Mesh(geo.sphere(0.13, 8), toon(look.hair));
-          c.position.set(Math.sin(a) * 0.52, y, Math.cos(a) * 0.52);
-          h.add(c);
-        }
-      }
-    }
-
-    if (!domeGeo) domeGeo = new THREE.SphereGeometry(0.56, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2);
-    const cap = part(domeGeo, uni.cap, 0.035);
-    cap.position.y = 0.5;
-    cap.rotation.x = -0.08;
-    h.add(cap);
-    const brim = part(geo.cyl(0.36, 0.36, 0.05, 16), uni.cap, 0.03);
-    brim.scale.set(1, 1, 0.85);
-    brim.position.set(0, 0.56, 0.52);
-    brim.rotation.x = 0.12;
-    h.add(brim);
-    const button = new THREE.Mesh(geo.sphere(0.06, 8), toon(uni.cap));
-    button.position.y = 1.06;
-    h.add(button);
   }
 
   // Face a direction on the field (x toward right field, y toward center field).
@@ -327,129 +181,173 @@ export class Kid extends THREE.Group {
     return -this.position.z;
   }
 
-  // Set a pose. `t` is a phase in radians for walk and run, and 0 to 1 for one-shot moves.
+  // Pick a pose. `t` is 0 to 1 through one-shot moves (swing, throw, dive); walking and running ignore it.
   pose(name: PoseName, t = 0) {
-    for (const j of this.joints) j.rotation.set(0, 0, 0);
-    this.hips.position.y = 1.65;
-    this.body.position.set(0, 0, 0);
-    this.body.rotation.set(0, 0, 0);
-    this.bat.visible = false;
-    const { shL, shR, elL, elR, hipL, hipR, knL, knR, torso, head } = this;
-    shL.rotation.z = 0.12;
-    shR.rotation.z = -0.12;
-    elL.rotation.x = -0.15;
-    elR.rotation.x = -0.15;
-    switch (name) {
-      case 'stand':
-        break;
+    this.state = name;
+    this.k = t;
+  }
+
+  private animate(dt: number) {
+    const c = this.char;
+    const st = this.state;
+    const loop = (n: AnimName, ts = 1) => c.fadeTo(n, 0.15, ts);
+    c.armsUp = 0;
+    switch (st) {
       case 'walk':
       case 'run': {
-        const amp = name === 'run' ? 0.9 : 0.45;
-        const s = Math.sin(t);
-        hipL.rotation.x = -s * amp;
-        hipR.rotation.x = s * amp;
-        knL.rotation.x = 0.25 + Math.max(0, s) * amp * 1.2;
-        knR.rotation.x = 0.25 + Math.max(0, -s) * amp * 1.2;
-        shL.rotation.x = s * amp;
-        shR.rotation.x = -s * amp;
-        elL.rotation.x = elR.rotation.x = name === 'run' ? -1.3 : -0.4;
-        torso.rotation.x = name === 'run' ? 0.2 : 0.05;
-        this.body.position.y = Math.abs(Math.cos(t)) * 0.12 * this.sc * amp;
+        // Match the legs to how fast the kid is really moving.
+        const mps = this.speed / this.sc;
+        if (st === 'run') loop('run', THREE.MathUtils.clamp(mps / (3.3 * c.scale), 0.7, 2.2));
+        else loop('walk', THREE.MathUtils.clamp(mps / (1.45 * c.scale), 0.6, 1.8));
         break;
       }
-      case 'ready':
-      case 'crouch': {
-        const deep = name === 'crouch' ? 1.6 : 1;
-        this.hips.position.y = 1.65 - 0.32 * deep;
-        hipL.rotation.x = hipR.rotation.x = -0.55 * deep;
-        knL.rotation.x = knR.rotation.x = 0.95 * deep;
-        hipL.rotation.z = 0.22;
-        hipR.rotation.z = -0.22;
-        torso.rotation.x = 0.45;
-        head.rotation.x = -0.4;
-        shL.rotation.x = shR.rotation.x = -0.9;
-        elL.rotation.x = elR.rotation.x = -0.4;
+      case 'crouch':
+        loop('crouch');
         break;
-      }
-      case 'bat':
-      case 'swing': {
-        // A right-handed batter, hands up by the back shoulder, then turning through the ball.
-        const k = name === 'swing' ? ease(Math.min(1, t)) : 0;
-        this.bat.visible = true;
-        hipL.rotation.z = 0.25;
-        hipR.rotation.z = -0.25;
-        knL.rotation.x = knR.rotation.x = 0.25;
-        this.hips.position.y = 1.6;
-        torso.rotation.y = lerp(-0.5, 1.4, k);
-        head.rotation.y = lerp(1.0, -0.3, k);
-        shR.rotation.x = lerp(-1.0, -1.6, k);
-        shR.rotation.z = lerp(-0.9, 0.2, k);
-        elR.rotation.x = lerp(-1.8, -0.3, k);
-        shL.rotation.x = lerp(-1.3, -1.6, k);
-        shL.rotation.z = lerp(-0.6, 0.3, k);
-        elL.rotation.x = lerp(-1.2, -0.2, k);
-        this.handR.rotation.x = lerp(-1.4, -1.5, k);
-        this.handR.rotation.z = lerp(0.4, 1.8, k);
-        break;
-      }
-      case 'bunt':
-        this.bat.visible = true;
-        torso.rotation.y = 0.9;
-        this.hips.position.y = 1.5;
-        knL.rotation.x = knR.rotation.x = 0.5;
-        hipL.rotation.x = hipR.rotation.x = -0.3;
-        shR.rotation.x = shL.rotation.x = -1.4;
-        elR.rotation.x = elL.rotation.x = -0.3;
-        this.handR.rotation.z = Math.PI / 2;
-        break;
-      case 'throw': {
-        // Arm back and up, then over the top and through.
-        const k = Math.min(1, t);
-        const a = k < 0.5 ? lerp(0, 2.4, ease(k * 2)) : lerp(2.4, 5.3, ease((k - 0.5) * 2));
-        shR.rotation.x = a;
-        elR.rotation.x = -0.7;
-        shL.rotation.x = lerp(-1.4, 0.4, k);
-        torso.rotation.y = lerp(-0.6, 0.5, k);
-        torso.rotation.x = lerp(0, 0.35, k);
-        hipL.rotation.x = lerp(0, -0.6, k);
-        knL.rotation.x = lerp(0, 0.4, k);
-        hipR.rotation.x = lerp(0, 0.4, k);
-        break;
-      }
-      case 'dive': {
-        const k = ease(Math.min(1, t));
-        this.body.rotation.x = 1.35 * k;
-        this.body.position.y = -0.2 * k * this.sc;
-        this.body.position.z = 1.2 * k * this.sc;
-        shL.rotation.x = shR.rotation.x = lerp(0, -2.9, k);
-        elL.rotation.x = elR.rotation.x = 0;
-        hipL.rotation.x = 0.2 * k;
-        hipR.rotation.x = 0.35 * k;
-        knL.rotation.x = 0.6 * k;
-        head.rotation.x = -0.9 * k;
-        break;
-      }
-      case 'cheer': {
-        const b = Math.abs(Math.sin(t * 6));
-        shL.rotation.x = shR.rotation.x = -2.8;
-        shL.rotation.z = 0.35 + b * 0.2;
-        shR.rotation.z = -0.35 - b * 0.2;
-        this.body.position.y = b * 0.4 * this.sc;
-        break;
-      }
-      case 'sad':
-        head.rotation.x = 0.45;
-        torso.rotation.x = 0.15;
-        shL.rotation.z = 0.05;
-        shR.rotation.z = -0.05;
+      case 'throw':
+        // In the clip the arm is cocked back at about 12% of the way through and released by 16%.
+        c.holdAt('throw', this.k < 0.5 ? this.k * 0.24 : 0.12 + (this.k - 0.5) * 0.36);
         break;
       case 'sit':
-        this.hips.position.y = 1.0;
-        hipL.rotation.x = hipR.rotation.x = -1.5;
-        knL.rotation.x = knR.rotation.x = 1.5;
-        shL.rotation.x = shR.rotation.x = -0.6;
-        elL.rotation.x = elR.rotation.x = -0.6;
+        loop('sit');
         break;
+      case 'cheer':
+        loop('dance');
+        break;
+      case 'sad':
+        loop('no');
+        break;
+      case 'dive':
+        loop('idle');
+        c.armsUp = 1;
+        break;
+      default:
+        loop('idle');
+    }
+    c.update(dt);
+  }
+
+  private bones(...names: string[]) {
+    return names.map((n) => this.char.bones.get(n)!);
+  }
+
+  // A point in the character's own frame (meters, x left, y up, z forward) to world space.
+  private pt(x: number, y: number, z: number) {
+    return this.char.root.localToWorld(new THREE.Vector3(x * this.H, y * this.H, z * this.H));
+  }
+  private dir(x: number, y: number, z: number) {
+    return new THREE.Vector3(x, y, z).normalize().transformDirection(this.char.root.matrixWorld);
+  }
+
+  // Poses the animation library doesn't have, layered on top of the clip.
+  private procedural() {
+    const c = this.char;
+    const root = c.root;
+    root.position.set(0, 0, 0);
+    root.rotation.set(0, 0, 0);
+    if (this.state === 'dive') {
+      const k = ease(Math.min(1, this.k));
+      root.rotation.x = 1.4 * k;
+      root.position.set(0, 0.12 * this.H * k, 0.45 * this.H * k);
+    }
+    this.updateMatrixWorld(true);
+    const [spine, spine3, head] = this.bones('spine_01', 'spine_03', 'Head');
+    if (this.lookYaw && head) {
+      head.quaternion.premultiply(_q.setFromAxisAngle(UP, this.lookYaw));
+      head.updateMatrixWorld(true);
+    }
+    const st = this.state;
+    if (st === 'bat' || st === 'swing' || st === 'bunt') {
+      const k = st === 'swing' ? Math.min(1, this.k) : 0;
+      const bunt = st === 'bunt';
+      // Turn the shoulders: loaded back, through the ball, then around toward the pitcher (+x).
+      const twist = bunt ? 0.9 : k < 0.55 ? lerp(-0.45, 0.6, ease(k / 0.55)) : lerp(0.6, 1.3, ease((k - 0.55) / 0.45));
+      spine.quaternion.premultiply(_q.setFromAxisAngle(UP, twist * 0.6));
+      spine.updateMatrixWorld(true);
+      spine3.quaternion.premultiply(_q.setFromAxisAngle(UP, twist * 0.4));
+      spine3.updateMatrixWorld(true);
+      const [ul, ll, hl, ur, lr, hr] = this.bones('upperarm_l', 'lowerarm_l', 'hand_l', 'upperarm_r', 'lowerarm_r', 'hand_r');
+      // Where the hands grip the bat, and which way the bat points, in the character's frame.
+      let grip: THREE.Vector3;
+      let bd: THREE.Vector3;
+      if (bunt) {
+        grip = this.pt(0.1, 0.6, 0.2);
+        bd = this.dir(0.05, 0.08, 1);
+      } else {
+        const keys = [
+          { k: 0, g: [-0.13, 0.78, 0.04], d: [-0.35, 0.85, -0.4] },
+          { k: 0.55, g: [0.02, 0.6, 0.2], d: [0.15, -0.05, 1] },
+          { k: 1, g: [0.14, 0.74, 0.04], d: [0.55, 0.35, -0.75] },
+        ];
+        const i = k < 0.55 ? 0 : 1;
+        const u = ease((k - keys[i].k) / (keys[i + 1].k - keys[i].k));
+        const g = keys[i].g.map((v, j) => lerp(v, keys[i + 1].g[j], u));
+        const d = keys[i].d.map((v, j) => lerp(v, keys[i + 1].d[j], u));
+        grip = this.pt(g[0], g[1], g[2]);
+        bd = this.dir(d[0], d[1], d[2]);
+      }
+      const top = grip.clone().add(bd.clone().multiplyScalar((bunt ? 0.2 : 0.045) * this.heightFt));
+      reach(ul, ll, hl, grip, this.pt(0.4, 0.2, -0.2));
+      reach(ur, lr, hr, top, this.pt(-0.5, 0.2, -0.2));
+      this.bat.visible = true;
+      this.worldToLocal(this.bat.position.copy(grip));
+      this.bat.quaternion.setFromUnitVectors(UP, bd.transformDirection(this.matrixWorld.clone().invert()));
+    } else this.bat.visible = false;
+    // Batters set the glove down.
+    this.glove.visible = !this.uni.casual && !this.bat.visible && this.gloveOn;
+
+    // The glove sits on the left hand.
+    if (this.glove.visible) {
+      const hl = c.bones.get('hand_l')!;
+      this.worldToLocal(hl.getWorldPosition(this.glove.position));
+      this.glove.position.y += 0.02 * this.heightFt;
     }
   }
+
+  private inScene() {
+    let o: THREE.Object3D | null = this;
+    while (o.parent) o = o.parent;
+    return (o as THREE.Scene).isScene === true && this.visible;
+  }
+
+  update(dt: number) {
+    if (!this.inScene()) return;
+    const p = this.getWorldPosition(_v);
+    if (dt > 0) this.speed = lerp(this.speed, p.distanceTo(this.last) / dt, 0.3);
+    this.last.copy(p);
+    this.animate(dt);
+    this.procedural();
+  }
+
+  // Animate every kid in the current screen.
+  static tick(dt: number) {
+    for (const k of live) k.update(dt);
+  }
+
+  // Forget the last screen's kids.
+  static clear() {
+    live.clear();
+  }
+}
+
+function sabinLook(look: Look, uni: Uniform, kit: Kit): SabinLook {
+  if (uni.casual)
+    return {
+      hair: HAIR_IDS[look.hairStyle],
+      hairColor: hex(look.hair),
+      top: { id: 'dad-tee', color: hex(uni.jersey), color2: '#ffffff' },
+      bottom: { id: 'jeans', color: hex(uni.pants), color2: '#2a4066' },
+      shoes: { id: 'sneakers', color: hex(uni.socks), color2: '#ffffff' },
+      hat: { id: 'cap', color: hex(uni.cap), color2: hex(uni.cap) },
+      backpack: null,
+    };
+  return {
+    hair: HAIR_IDS[look.hairStyle],
+    hairColor: hex(look.hair),
+    top: { id: 'bb-jersey', color: hex(uni.jersey), color2: hex(uni.cap) },
+    bottom: { id: 'bb-pants', color: hex(uni.pants), color2: '#ffffff' },
+    shoes: { id: 'bb-socks', color: hex(uni.socks), color2: hex(kit.cleats ?? 0x2b2b35) },
+    hat: { id: 'cap', color: hex(uni.cap), color2: hex(uni.cap) },
+    backpack: null,
+  };
 }

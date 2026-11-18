@@ -160,8 +160,7 @@ export function hubScreen(arg?: unknown): Screen {
     update(dt) {
       t += dt;
       kid.pose('stand');
-      kid.head.rotation.y = Math.sin(t * 0.8) * 0.25;
-      kid.shR.rotation.x = Math.sin(t * 2) * 0.05;
+      kid.lookYaw = Math.sin(t * 0.8) * 0.25;
     },
   };
 }

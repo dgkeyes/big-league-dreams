@@ -32,3 +32,7 @@ Progress is saved in the browser.
 ## Testing in a browser without a GPU
 
 In dev, `?manual` stops the real-time loop so `__step(seconds)` can advance the game, `?screen=game` (or `quest`, `cages`, `drills`, `drive`, `store`) opens a screen directly, and `window.__autoSwing = 'contact'` `window.__autoField = true` play for you, and `window.__autoRun = 1` runs one base past the hit (or `-1` to take what the hit gives).
+
+## Credits
+
+The 3D characters and animations in `public/models/` are CC0 models by [Quaternius](https://quaternius.com), shared with Leila's game, Sabin Elementary. The character code in `src/characters/` comes from that game too.

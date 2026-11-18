@@ -1,6 +1,7 @@
 // The one WebGL renderer, the main loop, and switching between screens.
 import * as THREE from 'three';
 import { clock } from './clock';
+import { Kid } from './gfx/kid';
 
 export interface Screen {
   scene: THREE.Scene;
@@ -38,6 +39,7 @@ export function go(name: string, arg?: unknown) {
     current.scene.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
   }
   currentName = name;
+  Kid.clear();
   current = make(arg);
   uiRoot.appendChild(current.ui);
   resize();
@@ -56,6 +58,7 @@ function resize() {
 function frame(dt: number) {
   clock.tick(dt);
   current?.update?.(dt * clock.scale);
+  Kid.tick(dt * clock.scale);
 }
 
 function render() {

@@ -753,3 +753,26 @@ h1, h2, h3, .logo {
 .pad.run-btn.safe { background: #37b24d; }
 .pad.run-btn.risky { background: #f59f00; }
 .pad.run-btn.wild { background: #e03131; }
+
+/* Loading the player models. */
+.loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 24px;
+  text-align: center;
+}
+.load-bar {
+  width: 420px;
+  height: 22px;
+  border-radius: 12px;
+  border: 4px solid #1d1b2f;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+.load-fill {
+  width: 0;
+  height: 100%;
+  background: #ffd23f;
+}
