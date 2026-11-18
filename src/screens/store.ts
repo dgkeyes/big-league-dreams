@@ -258,7 +258,7 @@ export function storeScreen(): Screen {
           'card results mad',
           h('h1', '', 'UH OH...'),
           h('p', 'dad-quote', '“There you are! You can’t run off like that. That’s it: no baseball today.”'),
-          h('p', '', 'Dad put everything back. You’ll sit out today, but tomorrow is a new day.'),
+          h('p', '', 'Dad put everything back. You’ll sit out today (it still counts as a game), but tomorrow is a new day.'),
           btn('GO HOME', () => go('hub'), 'blue big-btn'),
         ),
       ),

@@ -722,3 +722,34 @@ h1, h2, h3, .logo {
 .sec .row {
   justify-content: flex-start;
 }
+
+/* How far to run after a hit. */
+.run-ctl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(30px, env(safe-area-inset-bottom));
+  text-align: center;
+}
+.run-title {
+  font-family: 'Luckiest Guy', system-ui, sans-serif;
+  font-size: 34px;
+  margin-bottom: 12px;
+  -webkit-text-stroke: 2px #1d1b2f;
+  paint-order: stroke fill;
+  text-shadow: 0 4px 0 #1d1b2f;
+}
+.run-row {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+.pad.run-btn {
+  border-radius: 22px;
+  width: 200px;
+  height: 96px;
+  font-size: 24px;
+}
+.pad.run-btn.safe { background: #37b24d; }
+.pad.run-btn.risky { background: #f59f00; }
+.pad.run-btn.wild { background: #e03131; }
