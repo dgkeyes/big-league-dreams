@@ -110,6 +110,7 @@ export const HAIR_STYLES: { id: HairStyle; name: string }[] = [
   { id: 'curly', name: 'Curly' },
   { id: 'ponytail', name: 'Ponytail' },
   { id: 'long', name: 'Long' },
+  { id: 'mullet', name: 'Mullet' },
 ];
 
 export interface Profile {
@@ -286,7 +287,7 @@ const STYLES: HairStyle[] = ['short', 'buzz', 'curly', 'ponytail', 'long'];
 // Teammates and opponents: a mix of kids, the same ones every time for a given team.
 export function teamKids(league: League, count = 9) {
   const seed = league.abbr.charCodeAt(0) + league.abbr.charCodeAt(2) * 3;
-  return Array.from({ length: count }, (_, i) => {
+  const kids = Array.from({ length: count }, (_, i) => {
     const girl = (i + seed) % 3 === 0;
     const look: Look = {
       gender: girl ? 'girl' : 'boy',
@@ -298,6 +299,10 @@ export function teamKids(league: League, count = 9) {
     };
     return { name: NAMES[(i * 5 + seed) % NAMES.length], look };
   });
+  // Every team has one kid with a mullet. Slot 0 is skipped because on your own team that's you.
+  const rocker = kids.find((k, i) => i > 0 && k.look.gender === 'boy');
+  if (rocker) rocker.look.hairStyle = 'mullet';
+  return kids;
 }
 
 // The quest pitcher, always a little better than you.

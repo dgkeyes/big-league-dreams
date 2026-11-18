@@ -38,7 +38,7 @@ function mergeJoint(j: THREE.Group, keep: Set<THREE.Object3D>) {
   }
 }
 
-export type HairStyle = 'short' | 'buzz' | 'curly' | 'ponytail' | 'long';
+export type HairStyle = 'short' | 'buzz' | 'curly' | 'ponytail' | 'long' | 'mullet';
 export interface Look {
   gender: 'boy' | 'girl';
   skin: number;
@@ -272,6 +272,18 @@ export class Kid extends THREE.Group {
       const tie = new THREE.Mesh(geo.sphere(0.1, 8), toon(uni.jersey));
       tie.position.set(0, 0.5, -0.56);
       h.add(tie);
+    } else if (look.hairStyle === 'mullet') {
+      // Business in the front, party in the back: short on top, long down the back of the neck.
+      const back = part(geo.box(0.78, 0.7, 0.22), look.hair, 0.03);
+      back.position.set(0, 0.02, -0.4);
+      back.rotation.x = -0.12;
+      h.add(back);
+      for (const side of [1, -1]) {
+        const flip = part(geo.capsule(0.11, 0.22), look.hair, 0.03);
+        flip.position.set(side * 0.3, -0.28, -0.46);
+        flip.rotation.set(0.5, 0, side * 0.5);
+        h.add(flip);
+      }
     } else if (look.hairStyle === 'curly') {
       for (let i = 0; i < 9; i++) {
         const a = Math.PI - 1.5 + (i * 3) / 8;

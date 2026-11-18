@@ -16,7 +16,7 @@ Play on an iPad in Safari, held sideways. Use Share, then Add to Home Screen, to
 
 Everything is 3D (Three.js), with touch buttons over the view.
 
-- **Make your player:** name, boy or girl, skin, hair style and color, eyes, jersey number, one of four Portland leagues, and your position.
+- **Make your player:** name, boy or girl, skin, hair style (including a mullet) and color, eyes, jersey number, one of four Portland leagues, and your position.
 - **A day in the life:** practice and games take turns every day (Monday practice, Tuesday game, and so on, all year).
   - **Game days:** 9-inning games against another Portland team. You bat leadoff and play the position you picked.
   - **Practice days:** fielding drills, the batting cages, or a 3-inning scrimmage.
