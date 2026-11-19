@@ -3,8 +3,8 @@
 import * as THREE from 'three';
 import { register, go, type Screen } from '../app';
 import { clock } from '../clock';
-import { getProfile, saveProfile, leagueOf, uniformOf, kitOf, GEAR, STORE, SKILLS, type Gear } from '../data';
-import { Kid } from '../gfx/kid';
+import { getProfile, saveProfile, teamOf, uniformOf, kitOf, nextEvent, GEAR, STORE, SKILLS, type Gear } from '../data';
+import { makeKid } from '../gfx/kid';
 import { addLights, part, geo, flat, toon, label, P } from '../gfx/toon';
 import { Joystick } from '../input';
 import { div, h, btn, show, banner, pill } from '../ui';
@@ -121,12 +121,12 @@ export function storeScreen(): Screen {
     scene.add(tag);
   }
 
-  const league = leagueOf(prof.league);
-  const me = new Kid(prof.look, uniformOf(league), kitOf(prof), 4.1);
+  const league = teamOf(prof);
+  const me = makeKid(prof.look, uniformOf(league), kitOf(prof), 4.1);
   me.setField(0, -4);
   me.face(0, 1);
   scene.add(me);
-  const dad = new Kid(DAD_LOOK, DAD_CLOTHES, {}, 5.9);
+  const dad = makeKid(DAD_LOOK, DAD_CLOTHES, {}, 5.9);
   dad.setField(3, -2);
   dad.face(0, 1);
   dad.gloveOn = false;
@@ -249,6 +249,8 @@ export function storeScreen(): Screen {
     drawItem(null);
     sfx.aww();
     const p = getProfile();
+    // Busted after today's baseball is over means no baseball tomorrow.
+    const when = nextEvent(p) ? 'today' : 'tomorrow';
     p.noBaseball = true;
     saveProfile(p);
     ui.appendChild(
@@ -257,8 +259,8 @@ export function storeScreen(): Screen {
         div(
           'card results mad',
           h('h1', '', 'UH OH...'),
-          h('p', 'dad-quote', '“There you are! You can’t run off like that. That’s it: no baseball today.”'),
-          h('p', '', 'Dad put everything back. You’ll sit out today (it still counts as a game), but tomorrow is a new day.'),
+          h('p', 'dad-quote', `“There you are! You can’t run off like that. That’s it: no baseball ${when}.”`),
+          h('p', '', `Dad put everything back. You’ll sit out ${when} (it still counts as a game), but after that it’s a new day.`),
           btn('GO HOME', () => go('hub'), 'blue big-btn'),
         ),
       ),

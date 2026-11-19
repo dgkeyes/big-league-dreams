@@ -1,7 +1,7 @@
 // Practice days: the batting cages (10 pitches from a machine) and fielding drills (the coach hits you 6 balls).
 import { register, go, type Screen } from '../app';
 import { clock } from '../clock';
-import { getProfile, saveProfile, levelOf, skillsOf, kitOf, leagueOf, uniformOf, teamKids, bump, type SkillId } from '../data';
+import { getProfile, saveProfile, levelOf, skillsOf, kitOf, teamOf, uniformOf, teamKids, bump, PRACTICE, type SkillId } from '../data';
 import { battedBall, type Swing } from '../play';
 import { Park, rnd } from '../game/park';
 import { Batting } from '../game/batting';
@@ -16,8 +16,8 @@ function doneCard(ui: HTMLElement, title: string, line: string, gains: SkillId[]
   gains.forEach((g) => bump(p, g));
   p.money += cash;
   p.practices++;
-  p.day++;
-  p.noBaseball = false;
+  p.practiceDone = true;
+  p.time = Math.max(p.time, PRACTICE.end);
   saveProfile(p);
   sfx.fanfare();
   ui.appendChild(
@@ -117,7 +117,7 @@ export function cagesScreen(): Screen {
 export function drillsScreen(): Screen {
   const prof = getProfile();
   const lv = levelOf(prof);
-  const league = leagueOf(prof.league);
+  const league = teamOf(prof);
   const uni = uniformOf(league);
   const park = new Park(lv, league.abbr, 'DRILLS');
   // Drills happen at your spot, except pitchers and catchers practice at shortstop.

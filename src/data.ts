@@ -1,10 +1,13 @@
-import type { HairStyle, Kit, Look, Uniform } from './gfx/kid';
+import type { BodyStyle, HairStyle, Kit, Look, Uniform } from './gfx/kid';
+import { HIGH_SCHOOLS, MLB_TEAMS, MLB_ABBR } from './content/teams';
+import { COLLEGES } from './content/colleges';
 
 export type LeagueId = 'wilshire' | 'npdx' | 'parkside' | 'hollywood';
 export type Gender = 'boy' | 'girl';
 
+// A team you play for or against: a Portland league, a high school, a college, or an MLB team.
 export interface League {
-  id: LeagueId;
+  id: string;
   name: string;
   abbr: string;
   color: number;
@@ -75,7 +78,50 @@ export const LEVELS: Level[] = [
   { id: 'tball', name: 'T-Ball', age: 5, innings: 9, cpu: 38, def: 0, kRate: 0, bbRate: 0, bunts: false, tee: true, runLimit: 5, pitch: [24, 30], pitchDist: 30, ft: 4.1 },
   { id: 'little', name: 'Little League', age: 8, innings: 9, cpu: 50, def: 20, kRate: 0.17, bbRate: 0.11, bunts: true, tee: false, runLimit: 0, pitch: [40, 52], pitchDist: 46, ft: 4.7 },
   { id: 'high', name: 'High School', age: 15, innings: 9, cpu: 62, def: 40, kRate: 0.21, bbRate: 0.09, bunts: true, tee: false, runLimit: 0, pitch: [50, 64], pitchDist: 56, ft: 5.5 },
+  { id: 'college', name: 'College', age: 19, innings: 9, cpu: 72, def: 55, kRate: 0.23, bbRate: 0.09, bunts: true, tee: false, runLimit: 0, pitch: [56, 70], pitchDist: 60, ft: 5.9 },
+  { id: 'mlb', name: 'MLB', age: 23, innings: 9, cpu: 82, def: 70, kRate: 0.24, bbRate: 0.08, bunts: true, tee: false, runLimit: 0, pitch: [60, 76], pitchDist: 60, ft: 6.1 },
 ];
+export const HIGH = 2;
+export const COLLEGE = 3;
+export const MLB = 4;
+
+// Colors for schools and teams, which get the game's own colors instead of their real ones.
+const PALETTE: [number, number][] = [
+  [0xe03131, 0x9b1c1c], [0x1c7ed6, 0x14508f], [0x2f9e44, 0x1b5e2a], [0x7b3fe4, 0x4c1d95], [0xf08c00, 0xa85d00],
+  [0x0b7285, 0x084c59], [0xc2255c, 0x7f1239], [0x495057, 0x212529], [0x5c940d, 0x365f06], [0xd9480f, 0x8a2c08],
+];
+function hash(s: string) {
+  let h = 7;
+  for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h;
+}
+function abbrOf(name: string) {
+  const mlb = MLB_TEAMS.indexOf(name);
+  if (mlb >= 0) return MLB_ABBR[mlb];
+  const words = name.replace(/^(The|University of|University at|College of)\s+/, '').split(/[\s-]+/).filter((w) => /^[A-Z]/.test(w));
+  const w = words.find((x) => !['University', 'College', 'State', 'Los', 'New', 'San', 'St.', 'Kansas', 'Tampa'].includes(x)) ?? words[0] ?? name;
+  return w.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
+}
+export function teamNamed(name: string, display = name): League {
+  const [color, dark] = PALETTE[hash(name) % PALETTE.length];
+  return { id: name, name: display, abbr: abbrOf(name), color, dark };
+}
+
+// The team you play for right now, or null when you still need to pick one for this level.
+export function myTeam(p: Profile): League | null {
+  if (p.level < HIGH) return leagueOf(p.league);
+  const pick = p.level === HIGH ? p.school : p.level === COLLEGE ? p.college : p.mlbTeam;
+  if (!pick) return null;
+  return teamNamed(pick, p.level === HIGH ? `${pick} High` : pick);
+}
+
+// Who you might play against at your level.
+export function rivals(p: Profile): League[] {
+  const me = myTeam(p)?.id;
+  const names = p.level < HIGH ? null : p.level === HIGH ? HIGH_SCHOOLS : p.level === COLLEGE ? COLLEGES.map((c) => c.name) : MLB_TEAMS;
+  if (!names) return LEAGUES.filter((l) => l.id !== p.league);
+  return names.filter((n) => n !== me).map((n) => teamNamed(n, p.level === HIGH ? `${n} High` : n));
+}
 
 export const STORE = "Dick's Sporting Goods";
 
@@ -90,15 +136,15 @@ export interface Gear {
 }
 
 export const GEAR: Gear[] = [
-  { id: 'wood-slugger', slot: 'bat', name: 'Wood Slugger', price: 60, boost: { power: 5 }, color: 0xc68a4a },
-  { id: 'line-drive', slot: 'bat', name: 'Line Drive Alloy', price: 60, boost: { contact: 5 }, color: 0x4dabf7 },
-  { id: 'rose-rocket', slot: 'bat', name: 'Rose City Rocket', price: 180, boost: { power: 8, contact: 4 }, color: 0xf06595 },
-  { id: 'leather-glove', slot: 'glove', name: 'Pro Leather Glove', price: 50, boost: { fielding: 5 }, color: 0x8b4513 },
-  { id: 'quick-glove', slot: 'glove', name: 'Quick Hands Glove', price: 90, boost: { fielding: 4, arm: 4 }, color: 0x343a40 },
-  { id: 'gold-glove', slot: 'glove', name: 'Gold Glove', price: 180, boost: { fielding: 8, arm: 5 }, color: 0xf2c94c },
-  { id: 'speed-cleats', slot: 'cleats', name: 'Speed Cleats', price: 50, boost: { speed: 5 }, color: 0xff6b6b },
-  { id: 'turf-cleats', slot: 'cleats', name: 'Turf Grippers', price: 90, boost: { speed: 4, fielding: 3 }, color: 0x12b886 },
-  { id: 'lightning-cleats', slot: 'cleats', name: 'Lightning Cleats', price: 160, boost: { speed: 9 }, color: 0xffd43b },
+  { id: 'wood-slugger', slot: 'bat', name: 'Wood Slugger', price: 30, boost: { power: 5 }, color: 0xc68a4a },
+  { id: 'line-drive', slot: 'bat', name: 'Line Drive Alloy', price: 30, boost: { contact: 5 }, color: 0x4dabf7 },
+  { id: 'rose-rocket', slot: 'bat', name: 'Rose City Rocket', price: 90, boost: { power: 8, contact: 4 }, color: 0xf06595 },
+  { id: 'leather-glove', slot: 'glove', name: 'Pro Leather Glove', price: 25, boost: { fielding: 5 }, color: 0x8b4513 },
+  { id: 'quick-glove', slot: 'glove', name: 'Quick Hands Glove', price: 45, boost: { fielding: 4, arm: 4 }, color: 0x343a40 },
+  { id: 'gold-glove', slot: 'glove', name: 'Gold Glove', price: 90, boost: { fielding: 8, arm: 5 }, color: 0xf2c94c },
+  { id: 'speed-cleats', slot: 'cleats', name: 'Speed Cleats', price: 25, boost: { speed: 5 }, color: 0xff6b6b },
+  { id: 'turf-cleats', slot: 'cleats', name: 'Turf Grippers', price: 45, boost: { speed: 4, fielding: 3 }, color: 0x12b886 },
+  { id: 'lightning-cleats', slot: 'cleats', name: 'Lightning Cleats', price: 80, boost: { speed: 9 }, color: 0xffd43b },
 ];
 
 export const SKIN_TONES = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0xa86b3c, 0x8d5524, 0x5c3a1e];
@@ -135,6 +181,17 @@ export interface Profile {
   equipped: Partial<Record<Slot, string>>;
   // Days count up from 0, which is a Monday.
   day: number;
+  // The time of day in minutes after midnight, and what you've done today.
+  time: number;
+  ate: string[];
+  practiceDone: boolean;
+  gameDone: boolean;
+  storeTrips: number;
+  // The teams you picked when you moved up.
+  school?: string;
+  college?: string;
+  mlbTeam?: string;
+  bodyStyle: BodyStyle;
   // Dad said no baseball today, after wandering off at the store.
   noBaseball: boolean;
   practices: number;
@@ -175,6 +232,12 @@ function fresh(): Profile {
     owned: [],
     equipped: {},
     day: 0,
+    time: WAKE,
+    ate: [],
+    practiceDone: false,
+    gameDone: false,
+    storeTrips: 0,
+    bodyStyle: 'sabin',
     noBaseball: false,
     practices: 0,
   };
@@ -212,8 +275,13 @@ export function saveProfile(p: Profile) {
   }
 }
 
-export function leagueOf(id: LeagueId): League {
+export function leagueOf(id: string): League {
   return LEAGUES.find((l) => l.id === id) ?? LEAGUES[0];
+}
+
+// The team you play for (your Portland league until you pick a high school).
+export function teamOf(p: Profile): League {
+  return myTeam(p) ?? leagueOf(p.league);
 }
 
 export function levelOf(p: Profile) {
@@ -273,9 +341,41 @@ export function moveUp(p: Profile) {
   p.gamesAtLevel = 0;
 }
 
+// A day in the life: wake up at 7, practice every day from 10:30 to 11:30, and a game every other day from 1 to 3.
+export const WAKE = 7 * 60;
+export const PRACTICE = { start: 10 * 60 + 30, end: 11 * 60 + 30 };
+export const GAME = { start: 13 * 60, end: 15 * 60 };
+export const BEDTIME = 20 * 60 + 30;
+export const STORE_TRIPS = 2;
+export function clockText(min: number) {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+// What's next on today's schedule, if anything.
+// Dad's no-baseball rule applies to the next practice or game still on the schedule (the hub benches you then).
+export function nextEvent(p: Profile): { kind: 'practice' | 'game'; start: number } | null {
+  if (!p.practiceDone && p.time <= PRACTICE.start) return { kind: 'practice', start: PRACTICE.start };
+  if (dayKind(p.day) === 'game' && !p.gameDone && p.time <= GAME.start) return { kind: 'game', start: GAME.start };
+  return null;
+}
+// Is there time to do something that takes `min` minutes before the next thing on the schedule?
+export function hasTime(p: Profile, min: number) {
+  const next = nextEvent(p);
+  return p.time + min <= (next ? next.start : BEDTIME);
+}
+export function newDay(p: Profile) {
+  p.day++;
+  p.time = WAKE;
+  p.ate = [];
+  p.practiceDone = false;
+  p.gameDone = false;
+  p.storeTrips = 0;
+}
+
 export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 export const dayName = (d: number) => DAYS[d % 7];
-// Practice and games take turns every day, and the pattern keeps rolling across weeks.
+// Every day has practice, and every other day there's a game after it. The pattern keeps rolling across weeks.
 export const dayKind = (d: number): 'practice' | 'game' => (d % 2 === 0 ? 'practice' : 'game');
 
 const NAMES = [
@@ -286,7 +386,8 @@ const STYLES: HairStyle[] = ['short', 'buzz', 'curly', 'ponytail', 'long'];
 
 // Teammates and opponents: a mix of kids, the same ones every time for a given team.
 export function teamKids(league: League, count = 9) {
-  const seed = league.abbr.charCodeAt(0) + league.abbr.charCodeAt(2) * 3;
+  const ab = league.abbr.padEnd(3, 'X');
+  const seed = ab.charCodeAt(0) + ab.charCodeAt(2) * 3;
   const kids = Array.from({ length: count }, (_, i) => {
     const girl = (i + seed) % 3 === 0;
     const look: Look = {

@@ -2,8 +2,8 @@
 import { register, go, type Screen } from '../app';
 import { clock } from '../clock';
 import {
-  getProfile, saveProfile, leagueOf, levelOf, skillsOf, kitOf, uniformOf, teamKids, displayName, finishGame, bump,
-  LEAGUES, POSITIONS, GAMES_PER_LEVEL, type Pos, type Profile, type SkillId,
+  getProfile, saveProfile, teamOf, rivals, levelOf, skillsOf, kitOf, uniformOf, teamKids, displayName, finishGame, bump,
+  POSITIONS, GAMES_PER_LEVEL, GAME, PRACTICE, type Pos, type Profile, type SkillId,
 } from '../data';
 import { cpuPA, judge, resolve, type Bases, type BattedBall, type Outcome, type Play, type Swing } from '../play';
 import type { Kid, Look } from '../gfx/kid';
@@ -22,8 +22,8 @@ export function gameScreen(arg?: unknown): Screen {
   const prof = getProfile();
   const lv = levelOf(prof);
   const sk = () => skillsOf(prof);
-  const my = leagueOf(prof.league);
-  const others = LEAGUES.filter((l) => l.id !== my.id);
+  const my = teamOf(prof);
+  const others = rivals(prof);
   // A scrimmage is against your own teammates, split in two.
   const opp = mode === 'scrimmage' ? { ...my, abbr: 'GRY', name: 'Gray Team', color: 0x868e96, dark: 0x495057 } : others[Math.floor(Math.random() * others.length)];
   const myUni = uniformOf(my);
@@ -572,9 +572,13 @@ export function gameScreen(arg?: unknown): Screen {
       cash = Math.round(cash / 2);
       tokens = 0;
       p.practices++;
+      p.practiceDone = true;
+      p.time = Math.max(p.time, PRACTICE.end);
       gains.splice(1);
     } else {
       moved = finishGame(p, result, stats.ab >= 2 && stats.hr === stats.ab);
+      p.gameDone = true;
+      p.time = Math.max(p.time, GAME.end);
     }
     gains.forEach((g) => bump(p, g));
     p.money += cash;
@@ -582,8 +586,6 @@ export function gameScreen(arg?: unknown): Screen {
     p.atBats += stats.ab;
     p.hits += stats.hits;
     p.homers += stats.hr;
-    p.day++;
-    p.noBaseball = false;
     saveProfile(p);
 
     const title = mode === 'scrimmage' ? 'SCRIMMAGE OVER' : result === 'W' ? 'YOU WIN!' : result === 'L' ? 'TOUGH LOSS' : 'IT’S A TIE!';

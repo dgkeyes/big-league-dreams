@@ -776,3 +776,39 @@ h1, h2, h3, .logo {
   height: 100%;
   background: #ffd23f;
 }
+
+/* ---------- day in the life ---------- */
+.btn.yellow { background: #f59f00; }
+.pill.clock { padding-left: 16px; }
+.hub-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 560px;
+}
+.hub-side .btn { font-size: 17px; }
+.card.picker {
+  max-width: 820px;
+  width: 80vw;
+}
+.pick-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-top: 12px;
+  padding: 4px;
+  /* The page blocks touch scrolling everywhere else, so allow it here. */
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+.pick-list .btn.chip { font-size: 16px; }
+.pick-note { font-size: 12px; opacity: 0.8; }
+.drive-ctl.steer { display: flex; gap: 16px; }
+.hub .today-card { width: 330px; }
+.hub .today-card h2 { font-size: 26px; }
+.hub .today-card p { font-size: 17px; }
+.hub-side { max-width: 470px; }
+.hub-side .btn { font-size: 15px; padding: 10px 12px 7px; }
+.drive-ctl.steer { align-items: center; } .drive-ctl.steer .pad { font-size: 30px; }
+.drive-ctl.steer .pad.blue { background: #1c7ed6; } .drive-ctl.steer .pad.green { background: #37b24d; }
