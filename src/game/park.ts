@@ -4,7 +4,7 @@ import { clock } from '../clock';
 import { FIELDERS, fenceR, type BattedBall } from '../play';
 import type { Level, Pos } from '../data';
 import { buildPark, BASES } from '../gfx/field3d';
-import { Kid, type Kit, type Look, type Uniform } from '../gfx/kid';
+import { makeKid, type Kid, type Kit, type Look, type Uniform } from '../gfx/kid';
 import { part, geo, P } from '../gfx/toon';
 
 export { BASES };
@@ -76,7 +76,7 @@ export class Park {
   }
 
   kid(look: Look, uni: Uniform, kit: Kit = {}, ft = this.lv.ft) {
-    const k = new Kid(look, uni, kit, ft);
+    const k = makeKid(look, uni, kit, ft);
     this.scene.add(k);
     return k;
   }

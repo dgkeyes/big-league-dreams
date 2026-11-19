@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import { register, go, type Screen } from '../app';
 import {
-  getProfile, loadProfile, saveProfile, uniformOf, leagueOf, levelOf, defaultLook, kitOf,
-  LEAGUES, POSITIONS, SKIN_TONES, HAIR_COLORS, EYE_COLORS, HAIR_STYLES, type Profile,
+  getProfile, loadProfile, saveProfile, uniformOf, teamOf, levelOf, HIGH, defaultLook, kitOf,
+  LEAGUES, POSITIONS, SKIN_TONES, HAIR_COLORS, EYE_COLORS, HAIR_STYLES, type Profile, type LeagueId,
 } from '../data';
-import { Kid } from '../gfx/kid';
+import { makeKid, setBodyStyle, BODY_STYLES, type Kid } from '../gfx/kid';
 import { addLights, skyDome, tree, flat, cloud, P } from '../gfx/toon';
 import { div, h, btn } from '../ui';
 
@@ -50,9 +50,10 @@ export function setupScreen(arg?: unknown): Screen {
   const rebuild = () => {
     if (kid) {
       scene.remove(kid);
-      kid.char.dispose();
+      kid.dispose();
     }
-    kid = new Kid(prof.look, uniformOf(leagueOf(prof.league)), kitOf(prof), 4.4);
+    setBodyStyle(prof.bodyStyle);
+    kid = makeKid(prof.look, uniformOf(teamOf(prof)), kitOf(prof), 4.4);
     kid.rotation.y = spin;
     kid.position.x = 0;
     scene.add(kid);
@@ -105,6 +106,12 @@ export function setupScreen(arg?: unknown): Screen {
           ),
         ),
       ),
+    () =>
+      div(
+        'sec',
+        h('h3', '', 'Body style'),
+        div('row wrap', ...BODY_STYLES.map((b) => choice(prof.bodyStyle === b.id, b.name, () => (prof.bodyStyle = b.id)))),
+      ),
     () => div('sec', h('h3', '', 'Skin'), swatches(SKIN_TONES, prof.look.skin, (c) => (prof.look.skin = c))),
     () =>
       div(
@@ -126,13 +133,13 @@ export function setupScreen(arg?: unknown): Screen {
         ),
       ),
     () =>
-      div(
+      prof.level >= HIGH ? div('hidden') : div(
         'sec',
         h('h3', '', 'Your Portland league'),
         div(
           'grid2',
           ...LEAGUES.map((l) =>
-            choice(prof.league === l.id, l.name, () => (prof.league = l.id), `--team:${hex(l.color)}`),
+            choice(prof.league === l.id, l.name, () => (prof.league = l.id as LeagueId), `--team:${hex(l.color)}`),
           ),
         ),
       ),

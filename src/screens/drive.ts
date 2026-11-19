@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import { register, go, type Screen } from '../app';
 import { clock } from '../clock';
-import { getProfile, STORE } from '../data';
-import { Kid, type Look } from '../gfx/kid';
+import { getProfile, levelOf, STORE, HIGH } from '../data';
+import { makeKid, type Look } from '../gfx/kid';
 import { addLights, skyDome, tree, part, geo, flat, toon, cloud, textTexture } from '../gfx/toon';
-import { div, btn, banner } from '../ui';
+import { div, h, btn, banner } from '../ui';
 import { sfx } from '../sfx';
 
 export const DAD_LOOK: Look = { gender: 'boy', skin: 0xf1c27d, hair: 0x4a2e17, hairStyle: 'short', eyes: 0x4a2e17, number: 1 };
@@ -144,16 +144,20 @@ export function driveScreen(): Screen {
 
   const auto = car();
   scene.add(auto);
-  // Dad drives, you ride up front next to him.
-  const dad = new Kid(DAD_LOOK, DAD_CLOTHES, {}, 5.9);
-  dad.position.set(1.4, 1.5, -0.8);
+  // Dad drives and you ride next to him, until high school: then you drive and Dad rides along.
+  const youDrive = prof.level >= HIGH;
+  const DRIVER = 1.4;
+  const PASSENGER = -1.4;
+  const dad = makeKid(DAD_LOOK, DAD_CLOTHES, {}, 5.9);
+  dad.position.set(youDrive ? PASSENGER : DRIVER, 1.5, -0.8);
   dad.pose('sit');
   dad.body.scale.multiplyScalar(0.62);
   auto.add(dad);
-  const me = new Kid(prof.look, { jersey: 0xff922b, cap: 0x1971c2, pants: 0x3c5a8a, socks: 0xe53e3e, casual: true }, {}, 4.1);
-  me.position.set(-1.4, 1.8, -0.8);
+  const myFt = youDrive ? levelOf(prof).ft : 4.1;
+  const me = makeKid(prof.look, { jersey: 0xff922b, cap: 0x1971c2, pants: 0x3c5a8a, socks: 0xe53e3e, casual: true }, {}, myFt);
+  me.position.set(youDrive ? DRIVER : PASSENGER, youDrive ? 1.5 : 1.8, -0.8);
   me.pose('sit');
-  me.body.scale.multiplyScalar(0.75);
+  me.body.scale.multiplyScalar(youDrive ? 0.62 : 0.75);
   auto.add(me);
   auto.rotation.y = Math.PI;
 
@@ -164,13 +168,35 @@ export function driveScreen(): Screen {
     sfx.honk();
     banner(msg, 'BEEP BEEP!', '', '#ffffff', 700);
   }, 'orange honk');
-  ui.append(msg, div('top-right', btn('SKIP ▶▶', () => go('store'), 'gray small')), div('drive-ctl', honk));
+  // Hold GAS to go, and steer with the arrows to stay on the road.
+  const held = { gas: false, left: false, right: false };
+  const hold = (label: string, key: keyof typeof held, cls: string) => {
+    const b = h('button', `pad ${cls}`, label);
+    const set = (on: boolean) => (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      held[key] = on;
+      b.classList.toggle('down', on);
+    };
+    b.addEventListener('pointerdown', set(true));
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, set(false));
+    return b;
+  };
+  ui.append(
+    msg,
+    div('top-right', btn('SKIP ▶▶', () => go('store'), 'gray small')),
+    youDrive
+      ? div('drive-ctl steer', hold('◀', 'left', 'mid blue'), honk, hold('GAS', 'gas', 'mid green'), hold('▶', 'right', 'mid blue'))
+      : div('drive-ctl', honk),
+  );
 
   let z = 0;
+  let x = 5;
   let speed = 0;
+  let warned = 0;
   let arrived = false;
   void (async () => {
-    banner(msg, `Off to ${STORE}!`, 'Dad is driving', '#ffd23f', 2200);
+    banner(msg, `Off to ${STORE}!`, youDrive ? 'You’re driving! Hold GAS and steer' : 'Dad is driving', '#ffd23f', 2200);
     await clock.until(() => arrived);
     banner(msg, 'WE’RE HERE!', '', '#69db7c', 1500);
     await clock.wait(1.8);
@@ -187,10 +213,24 @@ export function driveScreen(): Screen {
       const stopAt = -1380;
       // Speed up, cruise, then slow down into the parking lot.
       const left = z - stopAt;
-      speed = Math.min(speed + dt * 30, 95, Math.max(4, left * 0.9));
+      if (youDrive) {
+        // Your foot on the gas, but the car still slows into the parking lot by itself.
+        speed = held.gas ? Math.min(speed + dt * 35, 80) : Math.max(0, speed - dt * 45);
+        speed = Math.min(speed, Math.max(4, left * 0.9));
+        if (speed > 1) x += ((held.right ? 1 : 0) - (held.left ? 1 : 0)) * dt * 14;
+        x = Math.max(-10, Math.min(10, x));
+        if (Math.abs(x) > 9.5 && t - warned > 3) {
+          warned = t;
+          banner(msg, 'STAY ON THE ROAD!', '“Careful!” says Dad', '#ff8787', 1200);
+        }
+        auto.rotation.y = Math.PI + ((held.left ? 1 : 0) - (held.right ? 1 : 0)) * 0.08;
+      } else {
+        speed = Math.min(speed + dt * 30, 95, Math.max(4, left * 0.9));
+        x = Math.sin(t * 0.7) * 0.3 + 5;
+      }
       if (left > 0.5) z -= speed * dt;
       else arrived = true;
-      auto.position.set(Math.sin(t * 0.7) * 0.3 + 5, Math.abs(Math.sin(t * 9)) * 0.05, z);
+      auto.position.set(x, Math.abs(Math.sin(t * 9)) * 0.05, z);
       camera.position.set(auto.position.x + 7, 14, z + 20);
       camera.lookAt(auto.position.x, 3, z - 10);
     },

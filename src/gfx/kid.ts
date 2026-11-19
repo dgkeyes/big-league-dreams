@@ -9,6 +9,7 @@ import { getAssets } from '../characters/assets';
 import { BODY_LANDMARKS } from '../characters/lookShader';
 import type { Look as SabinLook } from '../characters/types';
 import { textTexture } from './toon';
+import { JointKid } from './jointKid';
 
 export type HairStyle = 'short' | 'buzz' | 'curly' | 'ponytail' | 'long' | 'mullet';
 export interface Look {
@@ -34,6 +35,24 @@ export interface Kit {
 }
 
 export type PoseName = 'stand' | 'walk' | 'run' | 'ready' | 'bat' | 'swing' | 'bunt' | 'throw' | 'dive' | 'cheer' | 'sit' | 'crouch' | 'sad';
+
+// The four body styles in the character maker. Everyone on screen uses the one you pick.
+export type BodyStyle = 'sabin' | 'roblox' | 'draft2' | 'draft1';
+export const BODY_STYLES: { id: BodyStyle; name: string }[] = [
+  { id: 'sabin', name: 'Sabin' },
+  { id: 'roblox', name: 'Roblox' },
+  { id: 'draft2', name: 'Cartoon' },
+  { id: 'draft1', name: 'Flat' },
+];
+let bodyStyle: BodyStyle = 'sabin';
+export function setBodyStyle(s: BodyStyle) {
+  bodyStyle = s;
+}
+
+export type Kid = SabinKid | JointKid;
+export function makeKid(look: Look, uni: Uniform, kit: Kit = {}, heightFt = 4): Kid {
+  return bodyStyle === 'sabin' ? new SabinKid(look, uni, kit, heightFt) : new JointKid(look, uni, kit, heightFt, bodyStyle);
+}
 
 const HAIR_IDS: Record<HairStyle, string> = {
   short: 'parted',
@@ -84,9 +103,9 @@ function reach(upper: THREE.Bone, lower: THREE.Bone, hand: THREE.Bone, target: T
 }
 
 // Every kid on screen, so the main loop can animate them.
-const live = new Set<Kid>();
+const live = new Set<SabinKid>();
 
-export class Kid extends THREE.Group {
+export class SabinKid extends THREE.Group {
   // Scales the character (meters) to the kid's height in feet. Drive scales it down to fit in the car.
   readonly body = new THREE.Group();
   readonly char: Character;
@@ -162,6 +181,10 @@ export class Kid extends THREE.Group {
       m.renderOrder = 2;
       this.char.attach.get('spine_03')!.add(m);
     }
+  }
+
+  dispose() {
+    this.char.dispose();
   }
 
   // Face a direction on the field (x toward right field, y toward center field).
